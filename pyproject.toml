@@ -3,7 +3,7 @@ name = "sftp-file-transfer"
 version = "0.1.0"
 description = "Automated file transfer stream using SFTP and made in python."
 authors = [
-    {name = "None"}
+    {name = "Bruno Pinheiro", email = "bruno.opinheiro@outlook.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.13, <4.0"
@@ -21,3 +21,59 @@ pytest-cov = "^6.2.1"
 ruff = "^0.12.3"
 taskipy = "^1.14.1"
 
+[tool.pytest.ini_options]
+addopts = "-vv --cov=sftp_file_transfer --cov-report=term-missing -p no:warnings"
+testpaths = [
+    "tests"
+]
+
+[tool.ruff]
+line-length = 79
+indent-width = 4
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+[tool.ruff.lint]
+preview = true
+select = ['I', 'F', 'E', 'W', 'PL', 'PT']
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+preview = true
+quote-style = 'single'
+indent-style = "space"
+docstring-code-format = false
+
+[tool.taskipy.tasks]
+lint = "ruff check . & ruff check . --diff"
+format = "ruff check . --fix && ruff format ."
+pre_test = "task format"
+test = "pytest -vv --cov=sftp_file_transfer --cov-report=term-missing -p no:warnings"
+post_test = "coverage html"
