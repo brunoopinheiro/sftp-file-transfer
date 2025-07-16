@@ -24,8 +24,9 @@ def test_fetch_files(tmp_path):
     files = file_manager.fetch_files(test_dir)
 
     # Check if the fetched files match the created files
-    assert len(files) == 2
-    assert all(f.name in ["file1.txt", "file2.txt"] for f in files)
+    expected_len = 2
+    assert len(files) == expected_len
+    assert all(f.name in {"file1.txt", "file2.txt"} for f in files)
 
 
 def test_fetch_directories(tmp_path):
@@ -42,8 +43,9 @@ def test_fetch_directories(tmp_path):
     directories = file_manager.fetch_directories(test_dir)
 
     # Check if the fetched directories match the created subdirectories
-    assert len(directories) == 2
-    assert all(d.name in ["subdir1", "subdir2"] for d in directories)
+    expected_len = 2
+    assert len(directories) == expected_len
+    assert all(d.name in {"subdir1", "subdir2"} for d in directories)
 
 
 def test_fetch_files_filtered_by_extension(tmp_path):
@@ -64,6 +66,7 @@ def test_fetch_files_filtered_by_extension(tmp_path):
     )
 
     # Check if the fetched files match the .txt files created
-    assert len(txt_files) == 2
+    expected_len = 2
+    assert len(txt_files) == expected_len
     assert all(f.suffix == ".txt" for f in txt_files)
-    assert all(f.name in ["file1.txt", "file3.txt"] for f in txt_files)
+    assert all(f.name in {"file1.txt", "file3.txt"} for f in txt_files)
