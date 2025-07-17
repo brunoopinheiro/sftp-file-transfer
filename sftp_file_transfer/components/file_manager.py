@@ -7,7 +7,6 @@ logger: Logger = getLogger(__name__)
 
 
 class FileManager:
-
     def __init__(self):
         self.root_dir = self._find_root_directory()
 
@@ -19,7 +18,7 @@ class FileManager:
             Path: The root directory path.
         """
         root = Path.home().absolute()
-        logger.info(f"Root directory set to: {root}")
+        logger.info(f'Root directory set to: {root}')
         return root
 
     @staticmethod
@@ -37,7 +36,7 @@ class FileManager:
 
         dir_path = directory.absolute()
         files = [f for f in dir_path.iterdir() if f.is_file()]
-        logger.info(f"Fetched files from {dir_path}: {files}")
+        logger.info(f'Fetched files from {dir_path}: {files}')
         return files
 
     @staticmethod
@@ -56,7 +55,7 @@ class FileManager:
 
         dir_path = directory.absolute()
         dirs = [d for d in dir_path.iterdir() if d.is_dir()]
-        logger.info(f"Fetched directories from {dir_path}: {dirs}")
+        logger.info(f'Fetched directories from {dir_path}: {dirs}')
         return dirs
 
     @staticmethod
@@ -77,9 +76,12 @@ class FileManager:
             directory = Path(directory)
 
         dir_path = directory.absolute()
-        files = [f for f in dir_path.iterdir()
-                 if f.is_file() and f.suffix == extension]
-        logger.info(f"Fetched {extension} files from {dir_path}: {files}")
+        files = [
+            f
+            for f in dir_path.iterdir()
+            if f.is_file() and f.suffix == extension
+        ]
+        logger.info(f'Fetched {extension} files from {dir_path}: {files}')
         return files
 
     @staticmethod
@@ -87,7 +89,7 @@ class FileManager:
         source_files: List[Path],
         destination: Union[str, Path],
     ) -> None:
-        """ Copy files to the specified destination directory.
+        """Copy files to the specified destination directory.
 
         Args:
             source_files (List[Path]): List of source file paths to copy.
@@ -109,15 +111,15 @@ class FileManager:
 
             for src in source_files:
                 if not src.exists():
-                    logger.warning(f"Source file {src} does not exist.")
+                    logger.warning(f'Source file {src} does not exist.')
                 elif not src.is_file():
-                    logger.warning(f"Source {src} is not a file.")
+                    logger.warning(f'Source {src} is not a file.')
             for src in source_files:
                 dest = destination / src.name
                 copyfile(src, dest)
         except (SameFileError, SpecialFileError) as e:
-            logger.error(f"Error copying files: {e}")
+            logger.error(f'Error copying files: {e}')
             raise e
         except Exception as e:
-            logger.error(f"Unexpected error while copying files: {e}")
+            logger.error(f'Unexpected error while copying files: {e}')
             raise e

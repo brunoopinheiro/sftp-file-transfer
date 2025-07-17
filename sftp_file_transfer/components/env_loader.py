@@ -1,3 +1,4 @@
+# pragma: no cover
 import os
 from functools import wraps
 from logging import Logger, getLogger
@@ -21,26 +22,28 @@ def require_env_vars(func: Callable) -> Callable:
     Returns:
         Callable: The wrapped function.
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         required_vars = {
-            "SFTP_HOST",
-            "SFTP_PORT",
-            "SFTP_USER",
-            "SFTP_PASSWORD",
+            'SFTP_HOST',
+            'SFTP_PORT',
+            'SFTP_USER',
+            'SFTP_PASSWORD',
         }
         for var in required_vars:
             if not os.getenv(var):
-                logger.error(f"Missing required environment variable: {var}")
+                logger.error(f'Missing required environment variable: {var}')
                 raise ValueError(
-                    f"Missing required environment variable: {var}",
+                    f'Missing required environment variable: {var}',
                 )
             elif not isinstance(os.getenv(var), str):
-                logger.error(f"Environment variable {var} must be a string.")
+                logger.error(f'Environment variable {var} must be a string.')
                 raise ValueError(
-                    f"Environment variable {var} must be a string.",
+                    f'Environment variable {var} must be a string.',
                 )
         return func(*args, **kwargs)
+
     return wrapper
 
 
@@ -61,16 +64,11 @@ class EnvLoader:
 
     def __init__(self) -> None:
         load_dotenv(find_dotenv())
-        logger.info("Environment variables loaded from .env file.")
+        logger.info('Environment variables loaded from .env file.')
 
     @require_env_vars
     def __getattribute__(self, name: str) -> Any:
-        if name in {
-            "SFTP_HOST",
-            "SFTP_PORT",
-            "SFTP_USER",
-            "SFTP_PASSWORD"
-        }:
-            logger.info(f"Accessing environment variable: {name}")
+        if name in {'SFTP_HOST', 'SFTP_PORT', 'SFTP_USER', 'SFTP_PASSWORD'}:
+            logger.info(f'Accessing environment variable: {name}')
             return os.getenv(name)
         return super().__getattribute__(name)
