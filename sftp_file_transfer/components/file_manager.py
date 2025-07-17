@@ -87,6 +87,18 @@ class FileManager:
         source_files: List[Path],
         destination: Union[str, Path],
     ) -> None:
+        """ Copy files to the specified destination directory.
+
+        Args:
+            source_files (List[Path]): List of source file paths to copy.
+            destination (Union[str, Path]): The destination directory to copy
+                files to.
+
+        Raises:
+            (SameFileError, SpecialFileError): If an error occurs while
+                copying files.
+            Exception: If an unexpected error occurs.
+        """
         if isinstance(destination, str):
             destination = Path(destination)
 
