@@ -33,7 +33,8 @@ class SFTPManager:
 
     This class handles SFTP connections and file transfers using the
     Paramiko library. It requires environment variables for connection
-    parameters.
+    parameters. This class is designed to be used as a context manager, as
+    it automatically handles connection setup and teardown.
 
     Attributes:
         env_loader (EnvLoader): An instance of EnvLoader to access environment
@@ -157,7 +158,6 @@ class SFTPManager:
             raise FileNotFoundError(f'Local file {local_path} does not exist.')
         if not self._sftp:
             raise RuntimeError(CLIENT_NOT_CONNECTED)
-        print(local_path)
         result = self._sftp.put(
             localpath=str(local_path.resolve()),
             remotepath=remote_path,

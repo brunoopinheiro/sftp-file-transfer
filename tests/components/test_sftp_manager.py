@@ -1,6 +1,25 @@
 from sftp_file_transfer.components.sftp_manager import SFTPManager
 
 
+def test_sftp_connection(sftp_fixture):
+    """Test establishing an SFTP connection."""
+    host = sftp_fixture.host
+    port = sftp_fixture.port
+    username = 'user'
+    password = 'pw'
+
+    with SFTPManager({
+        'sftp_host': host,
+        'sftp_port': port,
+        'sftp_user': username,
+        'sftp_password': password,
+        'key_filepath': None,
+        'key_password': None,
+    }) as sftp_manager:
+        assert sftp_manager._transport is not None
+        assert sftp_manager._sftp is not None
+
+
 def test_sftp_upload(sftp_fixture, tmp_path):
     """Test fetching files and directories from SFTP server."""
     local_file = tmp_path / 'upload.txt'
