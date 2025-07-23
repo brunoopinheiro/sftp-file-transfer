@@ -1,7 +1,7 @@
 import logging
 from logging import Logger, getLogger
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import List, Optional, TypedDict
 
 from paramiko import RSAKey, SFTPAttributes, SFTPClient, Transport
 from tenacity import (
@@ -141,7 +141,7 @@ class SFTPManager:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         stop=stop_after_attempt(2),
         before_sleep=before_sleep_log(logger, logging.ERROR),
-        retry=retry_if_result(lambda result: not isinstance(result, str)),
+        retry=retry_if_result(lambda result: not result),
     )
     def upload_file(
         self,
@@ -184,3 +184,49 @@ class SFTPManager:
             raise RuntimeError(CLIENT_NOT_CONNECTED)
         self._sftp.get(remote_path, local_path)
         logger.info(f'Downloaded {remote_path} to {local_path}.')
+
+    def list_files(self, remote_path: str) -> List[Path]:
+        """List files in a remote directory.
+
+        Args:
+            remote_path (str): The remote directory path.
+
+        Raises:
+            RuntimeError: If the SFTP client is not connected.
+
+        Returns:
+            List[Path]: A list of paths representing the files in the remote
+                directory.
+        """
+        if not self._sftp:
+            raise RuntimeError(CLIENT_NOT_CONNECTED)
+        logger.info(f'Listing files in {remote_path}.')
+        return [Path(file) for file in self._sftp.listdir(remote_path)]
+
+    def make_directory(self, remote_path: str) -> None:
+        """Create a directory on the SFTP server.
+
+        Args:
+            remote_path (str): The remote directory path to create.
+
+        Raises:
+            RuntimeError: If the SFTP client is not connected.
+        """
+        if not self._sftp:
+            raise RuntimeError(CLIENT_NOT_CONNECTED)
+        self._sftp.mkdir(remote_path)
+        logger.info(f'Created directory {remote_path} on SFTP server.')
+
+    def remove_directory(self, remote_path: str) -> None:
+        """Remove a directory on the SFTP server.
+
+        Args:
+            remote_path (str): The remote directory path to remove.
+
+        Raises:
+            RuntimeError: If the SFTP client is not connected.
+        """
+        if not self._sftp:
+            raise RuntimeError(CLIENT_NOT_CONNECTED)
+        self._sftp.rmdir(remote_path)
+        logger.info(f'Removed directory {remote_path} from SFTP server.')
