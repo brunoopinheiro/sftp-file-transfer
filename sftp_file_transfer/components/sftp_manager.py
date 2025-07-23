@@ -139,7 +139,7 @@ class SFTPManager:
 
     @retry(
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        stop=stop_after_attempt(2),
+        stop=stop_after_attempt(5),
         before_sleep=before_sleep_log(logger, logging.ERROR),
         retry=retry_if_result(lambda result: not result),
     )
@@ -167,7 +167,7 @@ class SFTPManager:
 
     @retry(
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        stop=stop_after_attempt(2),
+        stop=stop_after_attempt(5),
         before_sleep=before_sleep_log(logger, logging.ERROR),
         reraise=True,
         retry=retry_if_not_result(lambda result: result is None),
