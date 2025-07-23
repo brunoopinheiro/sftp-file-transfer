@@ -10,9 +10,15 @@ requires-python = ">=3.13, <4.0"
 dependencies = [
     "python-dotenv (>=1.1.1,<2.0.0)",
     "paramiko (>=3.5.1,<4.0.0)",
-    "tenacity (>=9.1.2,<10.0.0)"
+    "tenacity (>=9.1.2,<10.0.0)",
+    "typer (>=0.16.0,<0.17.0)"
+]
+packages = [
+    { include = 'sftp_file_transfer' },
 ]
 
+[tool.poetry.scripts]
+sftp_send = 'sftp_file_transfer.main:app'
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

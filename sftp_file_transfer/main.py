@@ -1,11 +1,94 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import List, Optional
 
+from typer import Context, Option, Typer
+
+from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.file_manager import FileManager
 from sftp_file_transfer.components.sftp_manager import (
     SFTPManager,
     SFTPManagerConfig,
 )
+
+app = Typer()
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: Context,
+    t_delta: Optional[int] = Option(
+        None,
+        '--timedelta',
+        '-T',
+        help='The day difference from which the files should be sent. 0 = Today, 1 = yesterday',  # noqa
+    ),
+    file_extension: Optional[str] = Option(
+        None,
+        '--file_ext',
+        '-F',
+        help='The file extension that must be sent, if any.'
+    ),
+    remote_path: str = Option(
+        None,
+        '--remote',
+        '-R',
+        help='The remote path to which the files must be sent.',
+    ),
+    local_path: str = Option(
+        None,
+        '--local',
+        '-L',
+        help='The local path from which the files must be fetched.',
+    ),
+):
+    if ctx.invoked_subcommand:
+        return
+    try:
+        local = Path(local_path).resolve()
+
+        if not local.is_dir():
+            local.mkdir(parents=True)
+
+        env = EnvLoader()
+        config = SFTPManagerConfig(
+            sftp_host=env.SFTP_HOST,
+            sftp_port=int(env.SFTP_PORT),
+            sftp_user=env.SFTP_USER,
+            sftp_password=env.SFTP_PASSWORD,
+            key_filepath=None,
+            key_password=None
+        )
+        print(config)
+        manager = SFTPManager(config)
+
+        all_files: List[Path] = []
+        if file_extension:
+            all_files = FileManager.fetch_files_filtered_by_extension(
+                directory=local_path,
+                extension=file_extension,
+            )
+        else:
+            all_files = FileManager.fetch_files(local_path)
+
+        if t_delta is not None:
+            target_day = datetime.today() - timedelta(days=t_delta)
+            all_files = FileManager.filter_files_by_date(all_files, target_day)
+
+        print('Files to Send: ', all_files)
+
+        with manager as sftp:
+            for file in all_files:
+                sftp.upload_file(
+                    local_path=file,
+                    remote_path=f'{remote_path}/{file.name}',
+                )
+
+            remote_files = sftp.list_files(remote_path)
+            print('Files after Upload: ', remote_files)
+
+    except Exception as e:
+        print(e)
 
 
 def sftp_sample_flux():
@@ -50,30 +133,3 @@ def sftp_sample_flux():
 
         files_after_upload = sftp.list_files(str(new_dir))
         print(f'Files after upload: {files_after_upload}')
-
-
-if __name__ == '__main__':
-    # sftp_sample_flux()
-    downloads_dir = Path.home() / 'Downloads'
-    print(f'Downloads directory: {downloads_dir}')
-    fmanager = FileManager()
-    res = fmanager.fetch_files(downloads_dir)
-    a = res[0]
-
-    b = a.stat()
-
-    last_modified = b.st_mtime
-    last_modified_datetime = datetime.fromtimestamp(last_modified)
-    print(f'Last modified time: {last_modified_datetime}')
-
-    files_sorted_by_date = sorted(
-        res, key=lambda x: x.stat().st_mtime, reverse=True
-    )
-
-    yesterday = datetime.today() - timedelta(days=1)
-    files_from_yesterday = [
-        f for f in files_sorted_by_date
-        if datetime.fromtimestamp(f.stat().st_mtime).date() == yesterday.date()
-    ]
-
-    print('Ended Execution')
