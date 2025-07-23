@@ -1,3 +1,4 @@
+from datetime import datetime
 from logging import Logger, getLogger
 from pathlib import Path
 from shutil import SameFileError, SpecialFileError, copyfile
@@ -83,6 +84,47 @@ class FileManager:
         ]
         logger.info(f'Fetched {extension} files from {dir_path}: {files}')
         return files
+
+    @staticmethod
+    def sort_files_by_date(
+        files: List[Path],
+        reverse: bool = False,
+    ) -> List[Path]:
+        """Sort files by their last modified date.
+
+        Args:
+            files (List[Path]): List of file paths to sort.
+            reverse (bool): Whether to sort in descending order.
+
+        Returns:
+            List[Path]: Sorted list of file paths.
+        """
+        sorted_files = sorted(
+            files, key=lambda x: x.stat().st_mtime, reverse=reverse
+        )
+        logger.info(f'Sorted files by date: {sorted_files}')
+        return sorted_files
+
+    @staticmethod
+    def filter_files_by_date(
+        files: List[Path],
+        date: datetime,
+    ) -> List[Path]:
+        """Filter files by their last modified date.
+
+        Args:
+            files (List[Path]): List of file paths to filter.
+            date (datetime): The date to filter files by.
+
+        Returns:
+            List[Path]: Filtered list of file paths.
+        """
+        filtered_files = [
+            f for f in files
+            if datetime.fromtimestamp(f.stat().st_mtime).date() == date.date()
+        ]
+        logger.info(f'Filtered files by date {date}: {filtered_files}')
+        return filtered_files
 
     @staticmethod
     def copy_files_to(
