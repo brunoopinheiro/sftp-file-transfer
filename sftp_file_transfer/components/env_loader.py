@@ -63,8 +63,12 @@ class EnvLoader:
     """
 
     def __init__(self) -> None:
-        load_dotenv(find_dotenv())
-        logger.info('Environment variables loaded from .env file.')
+        logger.info('Loading environment variables from .env file.')
+        res = load_dotenv(find_dotenv())
+        if res is True:
+            logger.info('Environment variables successfully loaded.')
+        else:
+            logger.warning('No .env file found or variables not loaded.')
 
     @require_env_vars
     def __getattribute__(self, name: str) -> Any:
