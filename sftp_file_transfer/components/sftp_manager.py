@@ -1,5 +1,5 @@
 import logging
-from logging import Logger, getLogger
+from logging import Logger
 from pathlib import Path
 from typing import List, Optional, TypedDict
 
@@ -13,7 +13,9 @@ from tenacity import (
     wait_exponential,
 )
 
-logger: Logger = getLogger(__name__)
+from sftp_file_transfer.components.logger_setup import setup_logger
+
+logger: Logger = setup_logger()
 CLIENT_NOT_CONNECTED = 'SFTP client is not connected.'
 
 

@@ -1,10 +1,12 @@
 from datetime import datetime
-from logging import Logger, getLogger
+from logging import Logger
 from pathlib import Path
 from shutil import SameFileError, SpecialFileError, copyfile
 from typing import List, Union
 
-logger: Logger = getLogger(__name__)
+from sftp_file_transfer.components.logger_setup import setup_logger
+
+logger: Logger = setup_logger()
 
 
 class FileManager:

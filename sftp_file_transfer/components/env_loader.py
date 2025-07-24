@@ -1,12 +1,14 @@
 # pragma: no cover
 import os
 from functools import wraps
-from logging import Logger, getLogger
+from logging import Logger
 from typing import Any, Callable
 
 from dotenv import find_dotenv, load_dotenv
 
-logger: Logger = getLogger(__name__)
+from sftp_file_transfer.components.logger_setup import setup_logger
+
+logger: Logger = setup_logger()
 
 
 def require_env_vars(func: Callable) -> Callable:
