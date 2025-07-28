@@ -27,7 +27,7 @@ def main(
         None,
         '--file_ext',
         '-F',
-        help='The file extension that must be sent, if any.'
+        help='The file extension that must be sent, if any.',
     ),
     remote_path: str = Option(
         None,
@@ -57,7 +57,7 @@ def main(
             sftp_user=env.SFTP_USER,
             sftp_password=env.SFTP_PASSWORD,
             key_filepath=None,
-            key_password=None
+            key_password=None,
         )
         print(config)
         manager = SFTPManager(config)
@@ -98,7 +98,7 @@ def sftp_sample_flux():
         sftp_user='tester',
         sftp_password='password',
         key_filepath=None,
-        key_password=None
+        key_password=None,
     )
 
     manager = SFTPManager(config)
@@ -125,7 +125,7 @@ def sftp_sample_flux():
         sftp.download_file(str(remote_file), local_path)
 
         # update file
-        assert local_path.is_file(), "Downloaded file does not exist."
+        assert local_path.is_file(), 'Downloaded file does not exist.'
         local_path.write_text('Updated content for the downloaded file.')
 
         # Upload
