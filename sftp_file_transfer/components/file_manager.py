@@ -122,7 +122,8 @@ class FileManager:
             List[Path]: Filtered list of file paths.
         """
         filtered_files = [
-            f for f in files
+            f
+            for f in files
             if datetime.fromtimestamp(f.stat().st_mtime).date() == date.date()
         ]
         logger.info(f'Filtered files by date {date}: {filtered_files}')
