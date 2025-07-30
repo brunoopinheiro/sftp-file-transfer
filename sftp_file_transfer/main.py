@@ -45,11 +45,6 @@ def main(
     if ctx.invoked_subcommand:
         return
     try:
-        local = Path(local_path).resolve()
-
-        if not local.is_dir():
-            local.mkdir(parents=True)
-
         env = EnvLoader()
         config = SFTPManagerConfig(
             sftp_host=env.SFTP_HOST,
@@ -59,7 +54,6 @@ def main(
             key_filepath=None,
             key_password=None,
         )
-        print(config)
         manager = SFTPManager(config)
 
         all_files: List[Path] = []
@@ -75,8 +69,6 @@ def main(
             target_day = datetime.today() - timedelta(days=t_delta)
             all_files = FileManager.filter_files_by_date(all_files, target_day)
 
-        print('Files to Send: ', all_files)
-
         with manager as sftp:
             for file in all_files:
                 sftp.upload_file(
@@ -84,8 +76,7 @@ def main(
                     remote_path=f'{remote_path}/{file.name}',
                 )
 
-            remote_files = sftp.list_files(remote_path)
-            print('Files after Upload: ', remote_files)
+            sftp.list_files(remote_path)
 
     except Exception as e:
         print(e)
