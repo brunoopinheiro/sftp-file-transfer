@@ -1,10 +1,12 @@
 from datetime import datetime
-from logging import Logger, getLogger
+from logging import Logger
 from pathlib import Path
 from shutil import SameFileError, SpecialFileError, copyfile
 from typing import List, Union
 
-logger: Logger = getLogger(__name__)
+from sftp_file_transfer.components.logger_setup import setup_logger
+
+logger: Logger = setup_logger()
 
 
 class FileManager:
@@ -120,7 +122,8 @@ class FileManager:
             List[Path]: Filtered list of file paths.
         """
         filtered_files = [
-            f for f in files
+            f
+            for f in files
             if datetime.fromtimestamp(f.stat().st_mtime).date() == date.date()
         ]
         logger.info(f'Filtered files by date {date}: {filtered_files}')
