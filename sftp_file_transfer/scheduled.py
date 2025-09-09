@@ -27,7 +27,6 @@ group = Group()
     ),
 )
 def scheduled_task():
-    print('Starting')
     try:
         env = EnvLoader()
         config = SFTPManagerConfig(
@@ -43,7 +42,6 @@ def scheduled_task():
         file_extension = os.getenv('FILE_EXTENSION')
         t_delta = os.getenv('TIME_DELTA')
 
-        print(f'{local_dir=}, {remote_dir=}, {file_extension=:}, {t_delta=:}')
         if not local_dir or not remote_dir:
             raise ValueError('LOCAL_PATH and REMOTE_PATH must be set in env')
         manager = SFTPManager(config)
@@ -56,12 +54,10 @@ def scheduled_task():
             )
         else:
             all_files = FileManager.fetch_files(directory=local_dir)
-        print(f'Files: {all_files}')
 
         if t_delta:
             target_day = datetime.now() - timedelta(days=int(t_delta))
             all_files = FileManager.filter_files_by_date(all_files, target_day)
-            print(f'Filtered Files: {all_files}')
 
         with manager as sftp:
             for file in all_files:
@@ -70,7 +66,6 @@ def scheduled_task():
                     remote_path=f'{remote_dir}/{file.name}',
                 )
 
-            print(f'Remote Files: {sftp.list_files(remote_dir)}')
     except Exception as e:
         print(e)
 
