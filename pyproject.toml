@@ -35,6 +35,11 @@ pytest-sftpserver = "^1.3.0"
 [tool.poetry.group.builder.dependencies]
 pyinstaller = "^6.14.2"
 
+
+[tool.poetry.group.scheduling.dependencies]
+aioclock = "^0.3.0"
+tzdata = "^2025.2"
+
 [tool.pytest]
 log_cli = true
 log_cli_level = "INFO"
@@ -96,3 +101,4 @@ pre_test = "task format"
 test = "pytest -vv --cov=sftp_file_transfer --cov-report=term-missing -p no:warnings"
 post_test = "coverage html"
 build = 'pyinstaller --onefile --name sftp-file-transfer --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/main.py'
+build_scheduled = 'pyinstaller --onefile --name sftp-file-transfer-scheduled --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/scheduled.py'
