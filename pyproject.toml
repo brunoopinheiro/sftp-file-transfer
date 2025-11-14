@@ -101,3 +101,4 @@ pre_test = "task format"
 test = "pytest -vv --cov=sftp_file_transfer --cov-report=term-missing -p no:warnings"
 post_test = "coverage html"
 build = 'pyinstaller --onefile --name sftp-file-transfer --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/main.py'
+build_scheduled = 'pyinstaller --onefile --name sftp-file-transfer-scheduled --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/scheduled.py'
