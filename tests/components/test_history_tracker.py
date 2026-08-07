@@ -138,6 +138,31 @@ def test_get_pending_failed_files_returns_only_unsent_rows(tmp_path):
         assert pending == [failed_file.resolve()]
 
 
+def test_get_sent_hashes_returns_empty_set_when_empty(tmp_path):
+    """Test get_sent_hashes on an empty database."""
+    db_path = tmp_path / 'history.db'
+
+    with HistoryTracker(db_path) as tracker:
+        assert tracker.get_sent_hashes() == set()
+
+
+def test_get_sent_hashes_returns_only_sent_rows(tmp_path):
+    """Test get_sent_hashes excludes failed/pending rows."""
+    db_path = tmp_path / 'history.db'
+    sent_file = tmp_path / 'sent.txt'
+    failed_file = tmp_path / 'failed.txt'
+    sent_file.touch()
+    failed_file.touch()
+
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(sent_file, success=True)
+        tracker.record_attempt(failed_file, success=False, error='oops')
+
+        assert tracker.get_sent_hashes() == {
+            HistoryTracker.hash_path(sent_file),
+        }
+
+
 def test_context_manager_commits_and_closes_connection(tmp_path):
     """Test that the connection is closed after exiting the context."""
     db_path = tmp_path / 'history.db'

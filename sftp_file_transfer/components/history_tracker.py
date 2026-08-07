@@ -3,7 +3,7 @@ import sqlite3
 from datetime import date, datetime
 from logging import Logger
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Set, Union
 
 from sftp_file_transfer.components.logger_setup import setup_logger
 
@@ -93,6 +93,13 @@ class HistoryTracker:
         if row is None or row['max_date'] is None:
             return None
         return date.fromisoformat(row['max_date'])
+
+    def get_sent_hashes(self) -> Set[str]:
+        """path_hash values for all rows marked sent=1."""
+        rows = self._conn.execute(
+            'SELECT path_hash FROM send_history WHERE sent = 1',
+        ).fetchall()
+        return {row['path_hash'] for row in rows}
 
     def get_pending_failed_files(self) -> List[Path]:
         """local_path values for rows still marked sent=0."""

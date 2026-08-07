@@ -62,3 +62,30 @@ This currently only supports uploading files to the remote server.
 - `--remote`, `-R`: The remote directory where the files will be uploaded. It is required.
 - `--local`, `-L`: The local directory where the files are located. It is required.
 - `--help`: Show the help message and exit.
+
+## Scheduled Mode
+
+`sftp_file_transfer.scheduled` runs continuously, repeating a generate-then-send cycle every `POLL_INTERVAL_SECONDS`. Each cycle:
+1. If `GENERATOR_SCRIPT_PATH` is set, runs that PowerShell script and waits for it to finish (a generation failure is logged but does not block the send step below).
+2. Scans each directory in `LOCAL_PATH` and sends any file not already recorded as sent in the SQLite ledger (`HISTORY_DB_PATH`), plus retries anything that previously failed.
+
+Configure it via these additional `.env` variables:
+
+```dotenv
+LOCAL_PATH="C:/path/to/dir1;C:/path/to/dir2"
+REMOTE_PATH="/uploads"
+FILE_EXTENSION=".txt"
+HISTORY_DB_PATH="data/send_history.db"
+POLL_INTERVAL_SECONDS=30
+GENERATOR_SCRIPT_PATH="C:/path/to/generate_folios.ps1"
+GENERATOR_TIMEOUT_SECONDS=60
+```
+
+- `LOCAL_PATH`: semicolon-separated list of directories to scan.
+- `POLL_INTERVAL_SECONDS`: how often the cycle runs (defaults to `30`).
+- `GENERATOR_SCRIPT_PATH`: optional; if unset, the generation step is skipped and only sending happens.
+- `GENERATOR_TIMEOUT_SECONDS`: optional; if unset, the generator script has no timeout.
+
+> If this program takes over invoking the generation script, disable its existing Windows Task Scheduler entry to avoid running it twice.
+
+Use `sftp_history` (see `history_cli.py`) to inspect or reset the send ledger — e.g. `sftp_history report` for a summary, or `sftp_history reset <hash-or-path-substring>` to force a resend.
