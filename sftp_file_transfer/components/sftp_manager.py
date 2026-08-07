@@ -3,10 +3,17 @@ from logging import Logger
 from pathlib import Path
 from typing import List, Optional, TypedDict
 
-from paramiko import RSAKey, SFTPAttributes, SFTPClient, Transport
+from paramiko import (
+    RSAKey,
+    SFTPAttributes,
+    SFTPClient,
+    SSHException,
+    Transport,
+)
 from tenacity import (
     before_sleep_log,
     retry,
+    retry_if_exception_type,
     retry_if_not_result,
     retry_if_result,
     stop_after_attempt,
@@ -143,7 +150,13 @@ class SFTPManager:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         stop=stop_after_attempt(5),
         before_sleep=before_sleep_log(logger, logging.ERROR),
-        retry=retry_if_result(lambda result: not result),
+        reraise=True,
+        retry=(
+            retry_if_result(lambda result: not result)
+            | retry_if_exception_type(
+                (SSHException, ConnectionError, TimeoutError, EOFError)
+            )
+        ),
     )
     def upload_file(
         self,

@@ -1,8 +1,15 @@
+import os
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from sftp_file_transfer.components.file_manager import FileManager
+
+
+def _set_mtime(file_path: Path, when: datetime) -> None:
+    timestamp = when.timestamp()
+    os.utime(file_path, (timestamp, timestamp))
 
 
 def test_file_manager_initialization():
@@ -126,6 +133,69 @@ def test_copy_files(tmp_path):
     expected_len = 2
     assert len(copied_files) == expected_len
     assert all(f.name in {'file1.txt', 'file2.txt'} for f in copied_files)
+
+
+def test_filter_files_by_date_range_inclusive_bounds(tmp_path):
+    """Test filtering files by date range with inclusive bounds."""
+    file_manager = FileManager()
+    today = datetime.now()
+
+    start_file = tmp_path / 'start.txt'
+    end_file = tmp_path / 'end.txt'
+    outside_file = tmp_path / 'outside.txt'
+    start_file.touch()
+    end_file.touch()
+    outside_file.touch()
+
+    _set_mtime(start_file, today - timedelta(days=3))
+    _set_mtime(end_file, today)
+    _set_mtime(outside_file, today - timedelta(days=10))
+
+    filtered = file_manager.filter_files_by_date_range(
+        [start_file, end_file, outside_file],
+        (today - timedelta(days=3)).date(),
+        today.date(),
+    )
+
+    expected_len = 2
+    assert len(filtered) == expected_len
+    assert all(f.name in {'start.txt', 'end.txt'} for f in filtered)
+
+
+def test_filter_files_by_date_range_empty_range(tmp_path):
+    """Test filtering files with a range that matches nothing."""
+    file_manager = FileManager()
+    today = datetime.now()
+
+    file_path = tmp_path / 'file1.txt'
+    file_path.touch()
+    _set_mtime(file_path, today - timedelta(days=20))
+
+    filtered = file_manager.filter_files_by_date_range(
+        [file_path],
+        (today - timedelta(days=2)).date(),
+        today.date(),
+    )
+
+    assert filtered == []
+
+
+def test_filter_files_by_date_range_boundary_dates(tmp_path):
+    """Test that files exactly on the start/end boundary are included."""
+    file_manager = FileManager()
+    today = datetime.now()
+
+    boundary_file = tmp_path / 'boundary.txt'
+    boundary_file.touch()
+    _set_mtime(boundary_file, today - timedelta(days=5))
+
+    filtered = file_manager.filter_files_by_date_range(
+        [boundary_file],
+        (today - timedelta(days=5)).date(),
+        (today - timedelta(days=5)).date(),
+    )
+
+    assert filtered == [boundary_file]
 
 
 def test_copy_files_to_non_existent_directory(tmp_path):
