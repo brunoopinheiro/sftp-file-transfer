@@ -10,6 +10,7 @@ from sftp_file_transfer.components.logger_setup import setup_logger
 logger: Logger = setup_logger()
 
 DEFAULT_DB_PATH = Path('data') / 'send_history.db'
+_SHA256_HEX_LENGTH = 64
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS send_history (
@@ -99,6 +100,99 @@ class HistoryTracker:
             'SELECT local_path FROM send_history WHERE sent = 0',
         ).fetchall()
         return [Path(row['local_path']) for row in rows]
+
+    def list_records(
+        self,
+        sent: Optional[bool] = None,
+        since: Optional[date] = None,
+        until: Optional[date] = None,
+    ) -> List[sqlite3.Row]:
+        """All columns, optionally filtered by sent flag and/or a
+        file_date range (inclusive). Ordered by file_date DESC, then
+        file_name."""
+        clauses: List[str] = []
+        params: List[Union[str, int]] = []
+        if sent is not None:
+            clauses.append('sent = ?')
+            params.append(int(sent))
+        if since is not None:
+            clauses.append('file_date >= ?')
+            params.append(since.isoformat())
+        if until is not None:
+            clauses.append('file_date <= ?')
+            params.append(until.isoformat())
+
+        query = 'SELECT * FROM send_history'
+        if clauses:
+            query += ' WHERE ' + ' AND '.join(clauses)
+        query += ' ORDER BY file_date DESC, file_name ASC'
+
+        return self._conn.execute(query, params).fetchall()
+
+    def get_summary(self) -> dict:
+        """Aggregate counts and date range, plus last_sent_date via
+        get_last_sent_date() so both agree on what counts as sent."""
+        row = self._conn.execute(
+            'SELECT COUNT(*) AS total, SUM(sent) AS total_sent, '
+            'SUM(1 - sent) AS total_pending, MIN(file_date) AS min_date, '
+            'MAX(file_date) AS max_date FROM send_history',
+        ).fetchone()
+
+        return {
+            'total': row['total'] or 0,
+            'total_sent': row['total_sent'] or 0,
+            'total_pending': row['total_pending'] or 0,
+            'date_range_start': (
+                date.fromisoformat(row['min_date'])
+                if row['min_date'] else None
+            ),
+            'date_range_end': (
+                date.fromisoformat(row['max_date'])
+                if row['max_date'] else None
+            ),
+            'last_sent_date': self.get_last_sent_date(),
+        }
+
+    def find_records(self, identifier: str) -> List[sqlite3.Row]:
+        """Resolve identifier as either an exact path_hash (64 hex
+        chars, case-insensitive) or a case-insensitive substring match
+        against local_path. [] if nothing matches."""
+        is_hash = len(identifier) == _SHA256_HEX_LENGTH and all(
+            c in '0123456789abcdef' for c in identifier.lower()
+        )
+        if is_hash:
+            return self._conn.execute(
+                'SELECT * FROM send_history WHERE path_hash = ?',
+                (identifier.lower(),),
+            ).fetchall()
+        return self._conn.execute(
+            'SELECT * FROM send_history WHERE local_path LIKE ?',
+            (f'%{identifier}%',),
+        ).fetchall()
+
+    def reset_record(self, identifier: str) -> List[sqlite3.Row]:
+        """Uses find_records(identifier) to resolve candidates, then
+        sets sent=0 and sent_at=NULL for every matched row, without
+        touching attempts/last_error/last_attempt_at."""
+        rows = self.find_records(identifier)
+        if not rows:
+            return []
+        hashes = [row['path_hash'] for row in rows]
+        self._conn.executemany(
+            'UPDATE send_history SET sent = 0, sent_at = NULL '
+            'WHERE path_hash = ?',
+            [(h,) for h in hashes],
+        )
+        self._conn.commit()
+        logger.info(
+            f'Reset {len(hashes)} record(s) for identifier={identifier!r}',
+        )
+        placeholders = ','.join('?' * len(hashes))
+        return self._conn.execute(
+            f'SELECT * FROM send_history '
+            f'WHERE path_hash IN ({placeholders})',
+            hashes,
+        ).fetchall()
 
     def record_attempt(
         self,
