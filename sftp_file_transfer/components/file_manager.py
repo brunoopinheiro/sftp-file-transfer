@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from logging import Logger
 from pathlib import Path
 from shutil import SameFileError, SpecialFileError, copyfile
@@ -127,6 +127,32 @@ class FileManager:
             if datetime.fromtimestamp(f.stat().st_mtime).date() == date.date()
         ]
         logger.info(f'Filtered files by date {date}: {filtered_files}')
+        return filtered_files
+
+    @staticmethod
+    def filter_files_by_date_range(
+        files: List[Path],
+        start: date,
+        end: date,
+    ) -> List[Path]:
+        """Filter files whose last modified date falls within a range.
+
+        Args:
+            files (List[Path]): List of file paths to filter.
+            start (date): The start date of the range (inclusive).
+            end (date): The end date of the range (inclusive).
+
+        Returns:
+            List[Path]: Filtered list of file paths.
+        """
+        filtered_files = [
+            f
+            for f in files
+            if start <= datetime.fromtimestamp(f.stat().st_mtime).date() <= end
+        ]
+        logger.info(
+            f'Filtered files by date range {start}..{end}: {filtered_files}',
+        )
         return filtered_files
 
     @staticmethod
