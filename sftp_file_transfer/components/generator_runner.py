@@ -27,8 +27,10 @@ def run_generator_script(
         [
             'powershell.exe',
             '-NoProfile',
-            '-ExecutionPolicy', 'Bypass',
-            '-File', script_path,
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            script_path,
         ],
         capture_output=True,
         text=True,

@@ -58,7 +58,8 @@ def select_files_to_send(
             fetched_files = FileManager.fetch_files(directory=local_dir)
 
         candidate_files.extend(
-            f for f in fetched_files
+            f
+            for f in fetched_files
             if HistoryTracker.hash_path(f) not in sent_hashes
         )
 
@@ -148,7 +149,7 @@ app = AioClock()
 app.include_group(group)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     print('Starting scheduled SFTP file transfer...')
     print(f'It will run every {POLL_INTERVAL_SECONDS} seconds.')
     print('Press Ctrl+C to exit.')

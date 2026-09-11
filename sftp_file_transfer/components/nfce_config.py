@@ -4,7 +4,7 @@ from dotenv import find_dotenv, load_dotenv
 
 
 class NfceConfig:
-    '''Load and store NFCE configuration from environment variables.'''
+    """Load and store NFCE configuration from environment variables."""
 
     def __init__(self) -> None:
         load_dotenv(find_dotenv())

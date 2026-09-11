@@ -14,8 +14,7 @@ app = Typer()
 console = Console()
 
 _DB_HELP = (
-    'Path to the send_history.db ledger '
-    '(defaults to HISTORY_DB_PATH env var).'
+    'Path to the send_history.db ledger (defaults to HISTORY_DB_PATH env var).'
 )
 
 

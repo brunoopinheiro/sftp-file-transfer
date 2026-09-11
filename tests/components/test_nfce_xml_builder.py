@@ -2,6 +2,7 @@ import string
 
 from hypothesis import given
 from hypothesis import strategies as st
+
 from sftp_file_transfer.components.nfce_xml_builder import (
     classify_and_build,
 )
@@ -25,9 +26,7 @@ def test_authorized_doc_with_protocol_assembles_nfeproc_wrapper():
         '</NFe>'
     )
     protnfe_fragment = (
-        '<protNFe>\n'
-        '  <infProt><nProt>123456789</nProt></infProt>\n'
-        '</protNFe>'
+        '<protNFe>\n  <infProt><nProt>123456789</nProt></infProt>\n</protNFe>'
     )
     request_xml = f'<env>{nfe_fragment}</env>'
     response_xml = f'<env>{protnfe_fragment}</env>'
@@ -115,9 +114,7 @@ def test_unrecognized_returns_none_for_content_and_kind():
 def test_fragment_fidelity_preserves_exact_nfe_substring():
     """Test that NFe fragment appears exactly unchanged in output."""
     nfe_fragment = (
-        '<NFe   Id="special_spacing" >\n\t'
-        '<infNFe>content</infNFe>\n'
-        '</NFe>'
+        '<NFe   Id="special_spacing" >\n\t<infNFe>content</infNFe>\n</NFe>'
     )
     protnfe_fragment = '<protNFe><infProt><nProt>1</nProt></infProt></protNFe>'
     request_xml = f'<env>{nfe_fragment}</env>'
@@ -384,9 +381,7 @@ def test_nfe_fragment_fidelity_for_arbitrary_body_content(body):
     byte-for-byte in the assembled nfeProc output, for any body that
     doesn't itself contain a closing tag."""
     nfe_fragment = f'<NFe Id="x">{body}</NFe>'
-    protnfe_fragment = (
-        '<protNFe><infProt><nProt>1</nProt></infProt></protNFe>'
-    )
+    protnfe_fragment = '<protNFe><infProt><nProt>1</nProt></infProt></protNFe>'
     request_xml = f'<env>{nfe_fragment}</env>'
     response_xml = f'<env>{protnfe_fragment}</env>'
 
@@ -418,7 +413,8 @@ def test_evento_fragment_fidelity_for_arbitrary_body_content(body):
     response_xml=st.text(max_size=200),
 )
 def test_classify_and_build_never_raises_on_arbitrary_text(
-    request_xml, response_xml,
+    request_xml,
+    response_xml,
 ):
     """Test that classify_and_build never raises and always returns one
     of the known kinds, for arbitrary (possibly malformed) input."""

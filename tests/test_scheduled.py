@@ -109,7 +109,9 @@ def test_select_files_across_multiple_directories(tmp_path):
     with HistoryTracker(db_path) as tracker:
         tracker.record_attempt(failed_file, success=False, error='boom')
         selected = select_files_to_send(
-            [str(source_dir), str(other_dir)], None, tracker,
+            [str(source_dir), str(other_dir)],
+            None,
+            tracker,
         )
 
     assert {f.name for f in selected} == {'new.txt', 'failed.txt'}
@@ -130,12 +132,14 @@ def test_select_files_sends_both_charge_and_cancellation_files(tmp_path):
         selected = select_files_to_send([str(source_dir)], None, tracker)
 
     assert {f.name for f in selected} == {
-        'folio123_CHARGE.txt', 'folio123_CANCEL.txt',
+        'folio123_CHARGE.txt',
+        'folio123_CANCEL.txt',
     }
 
 
 def test_scheduled_task_still_sends_when_generator_fails(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """Test that a generator-script failure is logged but does not
     prevent the send step from running."""
@@ -176,3 +180,87 @@ def test_scheduled_task_still_sends_when_generator_fails(
         local_path=pending_file,
         remote_path=f'/uploads/{pending_file.name}',
     )
+
+
+def test_scheduled_task_swallows_missing_local_and_remote_path_env(
+    monkeypatch,
+):
+    """Test that missing LOCAL_PATH and REMOTE_PATH env vars are caught
+    and logged without raising an exception."""
+    monkeypatch.setenv('SFTP_HOST', 'localhost')
+    monkeypatch.setenv('SFTP_PORT', '22')
+    monkeypatch.setenv('SFTP_USER', 'user')
+    monkeypatch.setenv('SFTP_PASSWORD', 'pw')
+    # Set to '' rather than delenv: EnvLoader() calls load_dotenv(), which
+    # only skips vars already present in os.environ (even as ''). If we
+    # delenv'd instead, the real project .env (which defines these) would
+    # get reloaded here, silently defeating this test.
+    monkeypatch.setenv('LOCAL_PATH', '')
+    monkeypatch.setenv('REMOTE_PATH', '')
+    monkeypatch.delenv('GENERATOR_SCRIPT_PATH', raising=False)
+
+    # Should not raise - the ValueError for missing LOCAL_PATH/REMOTE_PATH
+    # is caught by the function's outer except and logged
+    scheduled_task()
+
+
+def test_scheduled_task_continues_after_one_file_upload_fails(
+    tmp_path,
+    monkeypatch,
+):
+    """Test that when one file fails to upload, the scheduled task
+    continues processing remaining files and records both attempts in
+    the history DB."""
+    source_dir = tmp_path / 'source'
+    source_dir.mkdir()
+    fail_file = source_dir / 'fail.txt'
+    ok_file = source_dir / 'ok.txt'
+    fail_file.touch()
+    ok_file.touch()
+
+    monkeypatch.setenv('SFTP_HOST', 'localhost')
+    monkeypatch.setenv('SFTP_PORT', '22')
+    monkeypatch.setenv('SFTP_USER', 'user')
+    monkeypatch.setenv('SFTP_PASSWORD', 'pw')
+    monkeypatch.setenv('LOCAL_PATH', str(source_dir))
+    monkeypatch.setenv('REMOTE_PATH', '/uploads')
+    monkeypatch.setenv('HISTORY_DB_PATH', str(tmp_path / 'history.db'))
+    monkeypatch.delenv('FILE_EXTENSION', raising=False)
+    monkeypatch.delenv('GENERATOR_SCRIPT_PATH', raising=False)
+
+    def upload_side_effect(local_path, remote_path):
+        """Raise for fail.txt, succeed for ok.txt."""
+        if local_path.name == 'fail.txt':
+            raise Exception('Upload failed for fail.txt')
+
+    mock_sftp = MagicMock()
+    mock_sftp.upload_file.side_effect = upload_side_effect
+    mock_manager = MagicMock()
+    mock_manager.__enter__.return_value = mock_sftp
+
+    with patch(
+        'sftp_file_transfer.scheduled.SFTPManager',
+        return_value=mock_manager,
+    ):
+        scheduled_task()
+
+    # Both files should have been attempted
+    expected_upload_attempts = 2
+    assert mock_sftp.upload_file.call_count == expected_upload_attempts
+
+    # Check the history DB records
+    db_path = tmp_path / 'history.db'
+    with HistoryTracker(db_path) as tracker:
+        fail_records = tracker.find_records('fail.txt')
+        ok_records = tracker.find_records('ok.txt')
+
+    # fail.txt should have sent=0 and a non-null error
+    assert len(fail_records) == 1
+    fail_record = fail_records[0]
+    assert fail_record['sent'] == 0
+    assert fail_record['last_error'] is not None
+
+    # ok.txt should have sent=1
+    assert len(ok_records) == 1
+    ok_record = ok_records[0]
+    assert ok_record['sent'] == 1

@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from hypothesis import given
 from hypothesis import strategies as st
+
 from sftp_file_transfer.components.nfce_file_writer import (
     already_exists,
     apply_document_datetime,
@@ -135,7 +136,9 @@ def test_apply_document_datetime_sets_mtime(tmp_path):
     tag=st.sampled_from(['dhEmi', 'dhEvento']),
 )
 def test_extract_document_datetime_round_trips_any_valid_iso_value(
-    dt, offset_minutes, tag,
+    dt,
+    offset_minutes,
+    tag,
 ):
     """Test that any valid ISO datetime with a UTC offset, embedded in
     either <dhEmi> or <dhEvento>, is parsed back to an equal datetime."""

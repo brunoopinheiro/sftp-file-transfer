@@ -151,11 +151,13 @@ class HistoryTracker:
             'total_pending': row['total_pending'] or 0,
             'date_range_start': (
                 date.fromisoformat(row['min_date'])
-                if row['min_date'] else None
+                if row['min_date']
+                else None
             ),
             'date_range_end': (
                 date.fromisoformat(row['max_date'])
-                if row['max_date'] else None
+                if row['max_date']
+                else None
             ),
             'last_sent_date': self.get_last_sent_date(),
         }
@@ -196,8 +198,7 @@ class HistoryTracker:
         )
         placeholders = ','.join('?' * len(hashes))
         return self._conn.execute(
-            f'SELECT * FROM send_history '
-            f'WHERE path_hash IN ({placeholders})',
+            f'SELECT * FROM send_history WHERE path_hash IN ({placeholders})',
             hashes,
         ).fetchall()
 

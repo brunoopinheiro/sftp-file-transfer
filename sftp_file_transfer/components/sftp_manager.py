@@ -153,9 +153,12 @@ class SFTPManager:
         reraise=True,
         retry=(
             retry_if_result(lambda result: not result)
-            | retry_if_exception_type(
-                (SSHException, ConnectionError, TimeoutError, EOFError)
-            )
+            | retry_if_exception_type((
+                SSHException,
+                ConnectionError,
+                TimeoutError,
+                EOFError,
+            ))
         ),
     )
     def upload_file(

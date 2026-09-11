@@ -20,7 +20,8 @@ def _completed_process(returncode, stdout='', stderr=''):
 def test_run_generator_script_success_does_not_raise():
     """Test that a zero exit code does not raise."""
     with patch(
-        'subprocess.run', return_value=_completed_process(0, stdout='done'),
+        'subprocess.run',
+        return_value=_completed_process(0, stdout='done'),
     ) as mock_run:
         run_generator_script('C:/scripts/generate.ps1')
 
@@ -29,8 +30,10 @@ def test_run_generator_script_success_does_not_raise():
     assert args[0] == [
         'powershell.exe',
         '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', 'C:/scripts/generate.ps1',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        'C:/scripts/generate.ps1',
     ]
     assert kwargs['timeout'] is None
 
@@ -39,10 +42,12 @@ def test_run_generator_script_passes_timeout():
     """Test that timeout_seconds is forwarded to subprocess.run."""
     expected_timeout = 15
     with patch(
-        'subprocess.run', return_value=_completed_process(0),
+        'subprocess.run',
+        return_value=_completed_process(0),
     ) as mock_run:
         run_generator_script(
-            'C:/scripts/generate.ps1', timeout_seconds=expected_timeout,
+            'C:/scripts/generate.ps1',
+            timeout_seconds=expected_timeout,
         )
 
     assert mock_run.call_args.kwargs['timeout'] == expected_timeout

@@ -65,7 +65,9 @@ def test_record_attempt_failure_sets_sent_false_and_last_error(tmp_path):
 
     with HistoryTracker(db_path) as tracker:
         tracker.record_attempt(
-            file_path, success=False, error='connection lost',
+            file_path,
+            success=False,
+            error='connection lost',
         )
 
         row = tracker._conn.execute(

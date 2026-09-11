@@ -52,20 +52,20 @@ def setup_logger(
     logger = getLogger(log_name)
     logger.setLevel(default_level)
 
-    handler = RotatingFileHandler(
-        filename=log_path,
-        maxBytes=max_bytes,
-        backupCount=backup_count,
-        encoding='utf-8',
-    )
-    formatter = Formatter(
-        '[%(asctime)s] %(levelname)s %(name)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    if not logger.handlers:
+        formatter = Formatter(
+            '[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+        )
+        handler = RotatingFileHandler(
+            filename=log_path,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding='utf-8',
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-    if not logger.hasHandlers():
         console = StreamHandler()
         console.setFormatter(formatter)
         logger.addHandler(console)

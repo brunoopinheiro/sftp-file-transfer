@@ -37,7 +37,8 @@ def test_list_command_filters_by_status_failed(tmp_path):
     _seed(db_path)
 
     result = runner.invoke(
-        app, ['list', '--status', 'failed', '--db', str(db_path)],
+        app,
+        ['list', '--status', 'failed', '--db', str(db_path)],
     )
 
     assert result.exit_code == 0
@@ -51,7 +52,8 @@ def test_list_command_rejects_invalid_status(tmp_path):
     _seed(db_path)
 
     result = runner.invoke(
-        app, ['list', '--status', 'bogus', '--db', str(db_path)],
+        app,
+        ['list', '--status', 'bogus', '--db', str(db_path)],
     )
 
     assert result.exit_code != 0
@@ -88,7 +90,8 @@ def test_reset_command_happy_path_single_match_with_yes_flag(tmp_path):
     identifier = HistoryTracker.hash_path(failed_file)
 
     result = runner.invoke(
-        app, ['reset', identifier, '--yes', '--db', str(db_path)],
+        app,
+        ['reset', identifier, '--yes', '--db', str(db_path)],
     )
 
     assert result.exit_code == 0
@@ -101,7 +104,8 @@ def test_reset_command_not_found_exits_nonzero(tmp_path):
     _seed(db_path)
 
     result = runner.invoke(
-        app, ['reset', 'does-not-exist', '--db', str(db_path)],
+        app,
+        ['reset', 'does-not-exist', '--db', str(db_path)],
     )
 
     assert result.exit_code != 0
@@ -124,7 +128,9 @@ def test_reset_command_multiple_matches_without_yes_prompts_and_aborts(
         tracker.record_attempt(file_b, success=False, error='oops')
 
     result = runner.invoke(
-        app, ['reset', 'batch', '--db', str(db_path)], input='n\n',
+        app,
+        ['reset', 'batch', '--db', str(db_path)],
+        input='n\n',
     )
 
     assert result.exit_code == 0
