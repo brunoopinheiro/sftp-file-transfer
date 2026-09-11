@@ -1,9 +1,16 @@
+import base64
 from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
 from sftp_file_transfer.components.nfce_generator import (
     run_nfce_extraction,
 )
+
+
+def _b64(text):
+    """Base64-encode text the way extract_invoice_content really returns
+    it, so mocked values survive a real base64-decode step."""
+    return base64.b64encode(text.encode('utf-8')).decode('ascii')
 
 
 def _make_mock_row(chave, uf, invoice_id, status, json_exp):
@@ -95,7 +102,7 @@ def test_authorized_with_protocol_increments_generated(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['request_b64', 'response_b64'],
+        side_effect=[_b64('request_b64'), _b64('response_b64')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -144,7 +151,7 @@ def test_cancellation_with_return_increments_cancellations(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -193,7 +200,7 @@ def test_authorized_no_protocol_increments_no_protocol(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -242,7 +249,7 @@ def test_unrecognized_increments_errors_no_write(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -288,7 +295,9 @@ def test_exception_in_classify_increments_errors_continues(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp', 'req', 'resp'],
+        side_effect=[
+            _b64('req'), _b64('resp'), _b64('req'), _b64('resp'),
+        ],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         side_effect=[Exception('Processing failed'), mock_result_ok],
@@ -388,7 +397,7 @@ def test_cancellation_no_return_increments_cancellations(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -439,7 +448,7 @@ def test_extract_document_datetime_called_with_date_source_fragment(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -482,7 +491,7 @@ def test_apply_document_datetime_called_with_extracted_datetime(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -525,7 +534,7 @@ def test_skips_datetime_application_when_date_fragment_is_none(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -568,7 +577,7 @@ def test_skips_datetime_application_when_date_fragment_is_falsy(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['req', 'resp'],
+        side_effect=[_b64('req'), _b64('resp')],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -612,6 +621,7 @@ def test_extract_invoice_content_called_with_request_and_response(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+        return_value=_b64('placeholder'),
     ) as mock_extract, patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         return_value=mock_result,
@@ -640,6 +650,9 @@ def test_classify_and_build_called_with_extracted_xmls(tmp_path):
         None,
     )
 
+    request_xml = 'request_xml_content'
+    response_xml = 'response_xml_content'
+
     with patch(
         'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
         return_value=[row],
@@ -651,7 +664,7 @@ def test_classify_and_build_called_with_extracted_xmls(tmp_path):
         return_value=False,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['request_xml_content', 'response_xml_content'],
+        side_effect=[_b64(request_xml), _b64(response_xml)],
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
     ) as mock_classify, patch(
@@ -660,10 +673,9 @@ def test_classify_and_build_called_with_extracted_xmls(tmp_path):
         mock_classify.return_value = mock_result
         run_nfce_extraction(engine, output_dir, lookback_days)
 
-        mock_classify.assert_called_once_with(
-            'request_xml_content',
-            'response_xml_content',
-        )
+        # classify_and_build must receive the DECODED xml text, not the
+        # base64 that extract_invoice_content actually returns.
+        mock_classify.assert_called_once_with(request_xml, response_xml)
 
 
 def test_multiple_rows_with_mixed_outcomes(tmp_path):
@@ -719,7 +731,7 @@ def test_multiple_rows_with_mixed_outcomes(tmp_path):
         side_effect=side_effect_already_exists,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=['r', 'r', 'r', 'r', 'r', 'r'],
+        side_effect=[_b64('r')] * 6,
     ), patch(
         'sftp_file_transfer.components.nfce_generator.classify_and_build',
         side_effect=classify_results,
