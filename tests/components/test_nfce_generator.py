@@ -51,20 +51,26 @@ def test_skipped_row_when_output_already_exists(tmp_path):
     row = _make_mock_row('ABC123', 'PE', 1, 'approved', '{"json": "data"}')
     mock_paths = _make_mock_paths('/path/auth', '/path/nopr', '/path/canc')
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=True,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-    ) as mock_extract, patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-    ) as mock_classify:
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=True,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+        ) as mock_extract,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+        ) as mock_classify,
+    ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
         assert result.total == 1
@@ -91,27 +97,36 @@ def test_authorized_with_protocol_increments_generated(tmp_path):
         '<NFe>date_fragment</NFe>',
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('request_b64'), _b64('response_b64')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ) as mock_write, patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('request_b64'), _b64('response_b64')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ) as mock_write,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ),
     ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -140,27 +155,36 @@ def test_cancellation_with_return_increments_cancellations(tmp_path):
         '<evento>date_fragment</evento>',
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ) as mock_write, patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ) as mock_write,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ),
     ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -189,27 +213,36 @@ def test_authorized_no_protocol_increments_no_protocol(tmp_path):
         '<NFe>date_fragment</NFe>',
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ) as mock_write, patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ) as mock_write,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ),
     ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -238,24 +271,31 @@ def test_unrecognized_increments_errors_no_write(tmp_path):
         None,
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ) as mock_write:
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ) as mock_write,
+    ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
         assert result.total == 1
@@ -284,29 +324,41 @@ def test_exception_in_classify_increments_errors_continues(tmp_path):
         '<NFe>date</NFe>',
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row_fail, row_ok],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[
-            _b64('req'), _b64('resp'), _b64('req'), _b64('resp'),
-        ],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        side_effect=[Exception('Processing failed'), mock_result_ok],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ) as mock_write, patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row_fail, row_ok],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[
+                _b64('req'),
+                _b64('resp'),
+                _b64('req'),
+                _b64('resp'),
+            ],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            side_effect=[Exception('Processing failed'), mock_result_ok],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ) as mock_write,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ),
     ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -386,27 +438,36 @@ def test_cancellation_no_return_increments_cancellations(tmp_path):
         '<evento>date_fragment</evento>',
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ) as mock_write, patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ) as mock_write,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ),
     ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -437,27 +498,36 @@ def test_extract_document_datetime_called_with_date_source_fragment(tmp_path):
         date_fragment,
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ) as mock_extract_dt, patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ) as mock_extract_dt,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ),
     ):
         run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -480,29 +550,38 @@ def test_apply_document_datetime_called_with_extracted_datetime(tmp_path):
     )
     mock_datetime = Mock()
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-        return_value=mock_datetime,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
-    ) as mock_apply_dt:
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+            return_value=mock_datetime,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ) as mock_apply_dt,
+    ):
         run_nfce_extraction(engine, output_dir, lookback_days)
 
         mock_apply_dt.assert_called_once_with('/path/auth', mock_datetime)
@@ -523,28 +602,37 @@ def test_skips_datetime_application_when_date_fragment_is_none(tmp_path):
         None,
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ) as mock_extract_dt, patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
-    ) as mock_apply_dt:
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ) as mock_extract_dt,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ) as mock_apply_dt,
+    ):
         run_nfce_extraction(engine, output_dir, lookback_days)
 
         mock_extract_dt.assert_not_called()
@@ -566,28 +654,37 @@ def test_skips_datetime_application_when_date_fragment_is_falsy(tmp_path):
         '',
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('req'), _b64('resp')],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ) as mock_extract_dt, patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
-    ) as mock_apply_dt:
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ) as mock_extract_dt,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ) as mock_apply_dt,
+    ):
         run_nfce_extraction(engine, output_dir, lookback_days)
 
         mock_extract_dt.assert_not_called()
@@ -610,23 +707,30 @@ def test_extract_invoice_content_called_with_request_and_response(tmp_path):
         None,
     )
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        return_value=_b64('placeholder'),
-    ) as mock_extract, patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        return_value=mock_result,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            return_value=_b64('placeholder'),
+        ) as mock_extract,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ),
     ):
         run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -653,22 +757,29 @@ def test_classify_and_build_called_with_extracted_xmls(tmp_path):
     request_xml = 'request_xml_content'
     response_xml = 'response_xml_content'
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=[row],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        return_value=mock_paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        return_value=False,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64(request_xml), _b64(response_xml)],
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-    ) as mock_classify, patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64(request_xml), _b64(response_xml)],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+        ) as mock_classify,
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ),
     ):
         mock_classify.return_value = mock_result
         run_nfce_extraction(engine, output_dir, lookback_days)
@@ -705,7 +816,9 @@ def test_multiple_rows_with_mixed_outcomes(tmp_path):
     # row2 (paths[1]) is skipped, so only rows 1/3/4 reach classify_and_build
     classify_results = [
         _make_mock_build_result(
-            'authorized_with_protocol', '<nfeProc>1</nfeProc>', None,
+            'authorized_with_protocol',
+            '<nfeProc>1</nfeProc>',
+            None,
         ),
         _make_mock_build_result(
             'cancellation_with_return',
@@ -713,34 +826,45 @@ def test_multiple_rows_with_mixed_outcomes(tmp_path):
             None,
         ),
         _make_mock_build_result(
-            'authorized_with_protocol', '<nfeProc>4</nfeProc>', None,
+            'authorized_with_protocol',
+            '<nfeProc>4</nfeProc>',
+            None,
         ),
     ]
 
     def side_effect_already_exists(candidate_paths):
         return candidate_paths == paths[1]
 
-    with patch(
-        'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
-        return_value=rows,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.build_output_paths',
-        side_effect=paths,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.already_exists',
-        side_effect=side_effect_already_exists,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
-        side_effect=[_b64('r')] * 6,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.classify_and_build',
-        side_effect=classify_results,
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.write_document',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
-    ), patch(
-        'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=rows,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            side_effect=paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            side_effect=side_effect_already_exists,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('r')] * 6,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            side_effect=classify_results,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_document_datetime',
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.apply_document_datetime',
+        ),
     ):
         result = run_nfce_extraction(engine, output_dir, lookback_days)
 
@@ -750,3 +874,51 @@ def test_multiple_rows_with_mixed_outcomes(tmp_path):
         assert result.cancellations == expected_cancellations
         assert result.skipped == expected_skipped
         assert result.errors == 0
+
+
+def test_unexpected_kind_value_is_handled_defensively_as_error(tmp_path):
+    """Test that a kind value outside the five known constants (which
+    should never happen in practice, since classify_and_build only ever
+    returns one of them) is still handled defensively as an error
+    instead of crashing or silently doing nothing."""
+    engine = Mock()
+    output_dir = str(tmp_path)
+    lookback_days = 30
+
+    row = _make_mock_row('WEIRD1', 'SP', 99, 'approved', '{"data": "x"}')
+    mock_paths = _make_mock_paths('/path/auth', '/path/nopr', '/path/canc')
+    mock_result = _make_mock_build_result('mystery_kind', '<x/>', None)
+
+    with (
+        patch(
+            'sftp_file_transfer.components.nfce_generator.fetch_pending_invoice_rows',
+            return_value=[row],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.build_output_paths',
+            return_value=mock_paths,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.already_exists',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.extract_invoice_content',
+            side_effect=[_b64('req'), _b64('resp')],
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.classify_and_build',
+            return_value=mock_result,
+        ),
+        patch(
+            'sftp_file_transfer.components.nfce_generator.write_document',
+        ) as mock_write,
+    ):
+        result = run_nfce_extraction(engine, output_dir, lookback_days)
+
+        assert result.errors == 1
+        assert result.generated == 0
+        assert result.cancellations == 0
+        assert result.no_protocol == 0
+        assert result.skipped == 0
+        mock_write.assert_not_called()

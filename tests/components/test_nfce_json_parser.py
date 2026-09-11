@@ -2,6 +2,7 @@ import string
 
 from hypothesis import given
 from hypothesis import strategies as st
+
 from sftp_file_transfer.components.nfce_json_parser import (
     extract_invoice_content,
 )
@@ -14,8 +15,11 @@ def _build_invoice_json(block, payload, escaped):
     with backslash-escaped quotes."""
     if escaped:
         return (
-            '{\\"Invoice\\":{\\"' + block + '\\":{\\"Content\\":\\"'
-            + payload + '\\"}}}'
+            '{\\"Invoice\\":{\\"'
+            + block
+            + '\\":{\\"Content\\":\\"'
+            + payload
+            + '\\"}}}'
         )
     return '{"Invoice":{"' + block + '":{"Content":"' + payload + '"}}}'
 
@@ -85,7 +89,9 @@ def test_respects_invoice_payload_scoping_boundary():
     escaped=st.booleans(),
 )
 def test_extract_invoice_content_round_trips_arbitrary_base64_payload(
-    payload, block, escaped,
+    payload,
+    block,
+    escaped,
 ):
     """Test that any base64-alphabet payload placed in the target block
     is extracted unchanged, regardless of escaping style."""
@@ -101,10 +107,25 @@ def test_extract_invoice_content_round_trips_arbitrary_base64_payload(
     block=st.sampled_from(['Request', 'Response']),
 )
 def test_extract_invoice_content_never_raises_on_arbitrary_text(
-    text, block,
+    text,
+    block,
 ):
     """Test that extract_invoice_content never raises on arbitrary
     (possibly malformed) input text."""
     result = extract_invoice_content(text, block)
 
     assert result is None or isinstance(result, str)
+
+
+def test_returns_none_when_json_text_is_not_a_string():
+    """Test that a non-string json_text (e.g. None) hits the defensive
+    except branch and returns None instead of raising."""
+    result = extract_invoice_content(None, 'Request')
+    assert result is None
+
+
+def test_returns_none_when_block_is_not_a_string():
+    """Test that a non-string block value hits the defensive except
+    branch and returns None instead of raising."""
+    result = extract_invoice_content('{"Invoice":{}}', None)
+    assert result is None
