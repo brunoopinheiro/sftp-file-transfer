@@ -7,6 +7,10 @@ database fetching, JSON parsing, XML building, and file writing.
 import base64
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
+from typing import Union
+
+import sqlalchemy as sa
 
 from sftp_file_transfer.components.nfce_db_client import (
     fetch_pending_invoice_rows,
@@ -45,11 +49,15 @@ class NfceExtractionSummary:
     errors: int = 0
 
 
-def run_nfce_extraction(engine, output_dir, lookback_days):
+def run_nfce_extraction(
+    engine: sa.engine.Engine,
+    output_dir: Union[str, Path],
+    lookback_days: int,
+) -> NfceExtractionSummary:
     """Run NFCe extraction pipeline.
 
-    Fetches pending invoice rows since the lookback date, extracts XML content
-    from JSON, classifies documents, and writes output files.
+    Fetches pending invoice rows since the lookback date, extracts XML
+    content from JSON, classifies documents, and writes output files.
 
     Args:
         engine: SQLAlchemy engine for database access.

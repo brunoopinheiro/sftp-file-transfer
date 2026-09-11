@@ -23,6 +23,17 @@ def build_output_paths(output_dir: Path, chave: str) -> NfceOutputPaths:
 
     Returns:
         NfceOutputPaths: Container with the three output paths.
+
+    Examples:
+        Build output paths for a given chave:
+
+        >>> paths = build_output_paths(Path('output'), '12345')
+        >>> paths.authorized.name
+        'NFe12345.xml'
+        >>> paths.cancellation.name
+        'NFe12345_cancelamento.xml'
+        >>> paths.no_protocol.name
+        'NFe12345_semprotocolo.xml'
     """
     return NfceOutputPaths(
         authorized=output_dir / f'NFe{chave}.xml',
@@ -69,6 +80,20 @@ def extract_document_datetime(xml_fragment: str) -> datetime | None:
 
     Returns:
         datetime | None: Parsed datetime or None if not found/invalid.
+
+    Examples:
+        Extract datetime from a dhEmi tag:
+
+        >>> extract_document_datetime(
+        ...     '<dhEmi>2024-09-11T10:30:45</dhEmi>'
+        ... )
+        datetime.datetime(2024, 9, 11, 10, 30, 45)
+
+        Return None when neither dhEmi nor dhEvento tag is present:
+
+        >>> extract_document_datetime(
+        ...     '<other>2024-09-11T10:30:45</other>'
+        ... )
     """
     # Try to find dhEmi tag first
     match = re.search(r'<dhEmi>([^<]+)</dhEmi>', xml_fragment)

@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from datetime import date
 from typing import List, Optional
 
@@ -19,14 +20,32 @@ _DB_HELP = (
 
 
 def _resolve_db_path(db: Optional[str]) -> str:
+    """Resolve the database path, falling back to env var or default.
+
+    Args:
+        db: Explicit database path, or None to use env var/default.
+
+    Returns:
+        str: The resolved database path.
+    """
     return db or os.getenv('HISTORY_DB_PATH', 'data/send_history.db')
 
 
 def _render_records_table(
-    rows: List,
+    rows: List[sqlite3.Row],
     title: str = 'Send History',
     show_error: bool = False,
 ) -> None:
+    """Render a table of send-history records to the console.
+
+    Args:
+        rows: List of sqlite3.Row objects from HistoryTracker.
+        title: Title to display above the table.
+        show_error: Whether to include error columns.
+
+    Returns:
+        None.
+    """
     table = Table(title=title)
     table.add_column('Status')
     table.add_column('File')
@@ -57,6 +76,20 @@ def _render_records_table(
 
 
 def _do_reset(identifier: str, db_path: str, yes: bool) -> None:
+    """Reset a record back to pending for retry.
+
+    Resolves matching records via HistoryTracker.find_records(). If
+    multiple matches exist and yes=False, displays them and prompts
+    for confirmation. Resets all matches and prints the result table.
+
+    Args:
+        identifier: sha256 path_hash or substring of local path.
+        db_path: Path to the send_history.db database.
+        yes: If True, skip confirmation prompt for multiple matches.
+
+    Returns:
+        None.
+    """
     with HistoryTracker(db_path) as tracker:
         matches = tracker.find_records(identifier)
         if not matches:
@@ -107,7 +140,17 @@ def list_(
         help=_DB_HELP,
     ),
 ) -> None:
-    """List tracked send-history records."""
+    """List tracked send-history records.
+
+    Args:
+        status: Filter by 'sent' or 'failed', or None for all records.
+        since: ISO date string for inclusive lower bound, or None.
+        until: ISO date string for inclusive upper bound, or None.
+        db: Path to the database, defaults to env var/hardcoded path.
+
+    Returns:
+        None.
+    """
     sent: Optional[bool] = None
     if status is not None:
         if status not in {'sent', 'failed'}:
@@ -135,7 +178,14 @@ def failures(
         help=_DB_HELP,
     ),
 ) -> None:
-    """List records that have not yet been sent successfully."""
+    """List records that have not yet been sent successfully.
+
+    Args:
+        db: Path to the database, defaults to env var/hardcoded path.
+
+    Returns:
+        None.
+    """
     with HistoryTracker(_resolve_db_path(db)) as tracker:
         rows = tracker.list_records(sent=False)
     _render_records_table(rows, title='Pending / Failed', show_error=True)
@@ -150,7 +200,14 @@ def report(
         help=_DB_HELP,
     ),
 ) -> None:
-    """Show a summary report of the send-history ledger."""
+    """Show a summary report of the send-history ledger.
+
+    Args:
+        db: Path to the database, defaults to env var/hardcoded path.
+
+    Returns:
+        None.
+    """
     with HistoryTracker(_resolve_db_path(db)) as tracker:
         summary = tracker.get_summary()
 
@@ -192,16 +249,44 @@ def reset(
         help=_DB_HELP,
     ),
 ) -> None:
-    """Force a record back to pending so it gets retried."""
+    """Force a record back to pending so it gets retried.
+
+    Args:
+        identifier: sha256 path_hash or substring of the local path.
+        yes: If True, skip confirmation prompt for multiple matches.
+        db: Path to the database, defaults to env var/hardcoded path.
+
+    Returns:
+        None.
+    """
     _do_reset(identifier, _resolve_db_path(db), yes)
 
 
 def _interactive_reset(db_path: str) -> None:
+    """Interactively prompt and reset a record.
+
+    Args:
+        db_path: Path to the send_history.db database.
+
+    Returns:
+        None.
+    """
     identifier = Prompt.ask('Enter a path substring or hash')
     _do_reset(identifier, db_path, yes=False)
 
 
 def _interactive_menu(db: Optional[str]) -> None:
+    """Display an interactive menu for history management.
+
+    Loops until the user chooses to exit, offering options to list
+    records, show failures, show report, or reset a record.
+
+    Args:
+        db: Path to the database, or None to use env var/default.
+
+    Returns:
+        None.
+    """
     db_path = _resolve_db_path(db)
     options = {
         '1': (
@@ -243,6 +328,16 @@ def main_callback(
         help=_DB_HELP,
     ),
 ) -> None:
+    """Typer app callback; launches the interactive menu if no
+    subcommand is invoked.
+
+    Args:
+        ctx: Typer context object.
+        db: Path to the database, defaults to env var/hardcoded path.
+
+    Returns:
+        None.
+    """
     if ctx.invoked_subcommand:
         return
     _interactive_menu(db)

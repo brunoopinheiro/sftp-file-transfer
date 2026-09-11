@@ -22,6 +22,9 @@ def run_generator_script(
     Raises:
         subprocess.CalledProcessError: If the script exits non-zero.
         subprocess.TimeoutExpired: If the script exceeds timeout_seconds.
+
+    Returns:
+        None.
     """
     result = subprocess.run(
         [

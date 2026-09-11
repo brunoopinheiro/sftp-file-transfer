@@ -42,6 +42,15 @@ def classify_and_build(request_xml: str, response_xml: str) -> NfceDocument:
         - 'cancellation_with_return': evento + retEvento in response.
         - 'cancellation_no_return': evento found, no retEvento.
         - 'unrecognized': neither NFe nor evento found in request.
+
+    Examples:
+        Classify an authorized NFe without protocol (no protNFe response):
+
+        >>> request = '<NFe><infNFe Id="NFe123"></infNFe></NFe>'
+        >>> response = ''
+        >>> doc = classify_and_build(request, response)
+        >>> doc.kind
+        'authorized_no_protocol'
     """
     # Try to find NFe fragment first (takes precedence if both present).
     nfe_match = re.search(r'<NFe\b.*?</NFe>', request_xml, re.DOTALL)

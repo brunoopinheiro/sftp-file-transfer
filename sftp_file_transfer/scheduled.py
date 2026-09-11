@@ -140,7 +140,18 @@ def run_folio_generation_step() -> None:
         first_run_strategy='immediate',
     ),
 )
-def scheduled_task():
+def scheduled_task() -> None:
+    """Run the scheduled SFTP file transfer cycle.
+
+    AioClock-scheduled job that runs the folio-generation step, then
+    selects and uploads all pending files to the remote SFTP server,
+    recording each attempt (success or failure) in the send-history
+    ledger. Catches and logs any exception so the schedule continues
+    running even if a cycle fails.
+
+    Returns:
+        None.
+    """
     print('Starting scheduled SFTP file transfer cycle...')
     try:
         run_folio_generation_step()

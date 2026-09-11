@@ -41,7 +41,24 @@ def main(
         '-L',
         help='The local path from which the files must be fetched.',
     ),
-):
+) -> None:
+    """CLI entrypoint that uploads matching files over SFTP.
+
+    Fetches files from the local path (optionally filtered by
+    extension), filters by date if specified, and uploads each
+    file to the remote path via SFTP.
+
+    Args:
+        ctx: Typer context object.
+        t_delta: Day offset from today (0=today, 1=yesterday), or
+            None for all files.
+        file_extension: Filter by file extension, or None for all.
+        remote_path: Remote directory path for uploads.
+        local_path: Local directory path to fetch files from.
+
+    Returns:
+        None.
+    """
     if ctx.invoked_subcommand:
         return
     try:

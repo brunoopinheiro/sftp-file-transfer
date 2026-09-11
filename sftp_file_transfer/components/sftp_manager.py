@@ -1,7 +1,8 @@
 import logging
 from logging import Logger
 from pathlib import Path
-from typing import List, Optional, TypedDict
+from types import TracebackType
+from typing import List, Optional, Type, TypedDict
 
 from paramiko import (
     RSAKey,
@@ -64,7 +65,20 @@ class SFTPManager:
         sftp_user: str,
         sftp_password: str,
     ) -> None:
-        """Check if the provided arguments are valid."""
+        """Check if the provided arguments are valid.
+
+        Args:
+            sftp_host (str): The SFTP server hostname.
+            sftp_port (int): The SFTP server port number.
+            sftp_user (str): The SFTP user name.
+            sftp_password (str): The SFTP password.
+
+        Raises:
+            ValueError: If any parameter is not of the expected type.
+
+        Returns:
+            None.
+        """
         if not all([
             isinstance(sftp_host, str),
             isinstance(sftp_port, int),
@@ -103,7 +117,12 @@ class SFTPManager:
         self._connect()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
         """Close the SFTP connection.
 
         Args:
@@ -111,14 +130,27 @@ class SFTPManager:
                 raised.
             exc_value (Optional[BaseException]): The exception instance raised.
             traceback (Optional[TracebackType]): The traceback object.
+
+        Returns:
+            None.
         """
         logger.info(
-            f'Closing SFTP connection.{exc_type=:}, {exc_value=:}, {traceback=:}',  # noqa
+            f'Closing SFTP connection.{exc_type=:}, {exc_value=:}, '
+            f'{traceback=:}',
         )
         self.close()
 
     def _connect(self) -> None:
-        """Establish an SFTP connection."""
+        """Establish an SFTP connection.
+
+        Opens a Transport to the configured host and port, then
+        authenticates either via RSA private key (if key_filepath is
+        set) or via username/password. Finally, builds the SFTP
+        client (self._sftp) from the transport.
+
+        Returns:
+            None.
+        """
         self._transport = Transport((self.host, self.port))
         if self.key_filepath:
             private_key = RSAKey.from_private_key_file(
@@ -138,7 +170,15 @@ class SFTPManager:
         self._sftp = SFTPClient.from_transport(self._transport)
 
     def close(self) -> None:
-        """Close the SFTP connection."""
+        """Close the SFTP connection.
+
+        Safely closes both the SFTP client and the transport if they
+        are open. This method is idempotent and safe to call multiple
+        times or when nothing is connected.
+
+        Returns:
+            None.
+        """
         if self._sftp:
             self._sftp.close()
             self._sftp = None
@@ -171,6 +211,13 @@ class SFTPManager:
         Args:
             local_path (Path): The local file path to upload.
             remote_path (str): The remote file path on the SFTP server.
+
+        Raises:
+            FileNotFoundError: If the local file does not exist.
+            RuntimeError: If the SFTP client is not connected.
+
+        Returns:
+            SFTPAttributes: The attributes of the uploaded file.
         """
         if not Path(local_path).is_file():
             raise FileNotFoundError(f'Local file {local_path} does not exist.')
@@ -192,11 +239,19 @@ class SFTPManager:
     )
     def download_file(self, remote_path: str, local_path: Path) -> None:
         """Download a file from the SFTP server.
+
         Any exception raised during the operation will be passed through.
 
         Args:
             remote_path (str): The remote file path on the SFTP server.
-            local_path (Path): The local file path to save the downloaded file.
+            local_path (Path): The local file path to save the downloaded
+                file.
+
+        Raises:
+            RuntimeError: If the SFTP client is not connected.
+
+        Returns:
+            None.
         """
         if not self._sftp:
             raise RuntimeError(CLIENT_NOT_CONNECTED)
@@ -213,8 +268,8 @@ class SFTPManager:
             RuntimeError: If the SFTP client is not connected.
 
         Returns:
-            List[Path]: A list of paths representing the files in the remote
-                directory.
+            List[Path]: A list of paths representing the files in the
+                remote directory.
         """
         if not self._sftp:
             raise RuntimeError(CLIENT_NOT_CONNECTED)
@@ -229,6 +284,9 @@ class SFTPManager:
 
         Raises:
             RuntimeError: If the SFTP client is not connected.
+
+        Returns:
+            None.
         """
         if not self._sftp:
             raise RuntimeError(CLIENT_NOT_CONNECTED)
@@ -243,6 +301,9 @@ class SFTPManager:
 
         Raises:
             RuntimeError: If the SFTP client is not connected.
+
+        Returns:
+            None.
         """
         if not self._sftp:
             raise RuntimeError(CLIENT_NOT_CONNECTED)

@@ -24,6 +24,32 @@ def extract_invoice_content(json_text: str, block: str) -> str | None:
     Returns:
         str | None: The extracted base64 content string, empty string if
             Content is empty, or None if the block/Content is not found.
+
+    Examples:
+        Extract base64 content from a Request block:
+
+        >>> extract_invoice_content(
+        ...     '{"Invoice": {"Request": {"Content": "dGVzdA=="}, '
+        ...     '"Payload": ""}}',
+        ...     'Request'
+        ... )
+        'dGVzdA=='
+
+        Return None when the requested block is not present:
+
+        >>> extract_invoice_content(
+        ...     '{"Invoice": {"Response": {"Content": "dGVzdA=="}, '
+        ...     '"Payload": ""}}',
+        ...     'Request'
+        ... )
+
+        Return empty string when Content is empty:
+
+        >>> extract_invoice_content(
+        ...     '{"Invoice": {"Request": {"Content": ""}, "Payload": ""}}',
+        ...     'Request'
+        ... )
+        ''
     """
     try:
         # Step 1: Try to scope to Invoice...Payload substring
