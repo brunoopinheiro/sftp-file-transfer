@@ -7,7 +7,7 @@ from sftp_file_transfer.components.env_loader import EnvLoader
 
 
 def test_accessing_env_vars_returns_values_from_environment(monkeypatch):
-    'Test that all 4 required env vars are accessible via EnvLoader instance.'
+    "Test that all 4 required env vars are accessible via EnvLoader instance."
     monkeypatch.setenv('SFTP_HOST', 'sftp.example.com')
     monkeypatch.setenv('SFTP_PORT', '22')
     monkeypatch.setenv('SFTP_USER', 'testuser')
@@ -22,7 +22,7 @@ def test_accessing_env_vars_returns_values_from_environment(monkeypatch):
 
 
 def test_accessing_attribute_raises_when_required_var_missing(monkeypatch):
-    'Test that accessing any attribute raises when a required var is missing.'
+    "Test that accessing any attribute raises when a required var is missing."
     monkeypatch.setenv('SFTP_HOST', 'sftp.example.com')
     monkeypatch.setenv('SFTP_PORT', '22')
     monkeypatch.setenv('SFTP_USER', 'testuser')
@@ -37,7 +37,7 @@ def test_accessing_attribute_raises_when_required_var_missing(monkeypatch):
 
 
 def test_raises_when_env_var_is_not_string(monkeypatch):
-    'Test that accessing attribute raises when env var is not a string.'
+    "Test that accessing attribute raises when env var is not a string."
     monkeypatch.setenv('SFTP_HOST', 'sftp.example.com')
     monkeypatch.setenv('SFTP_PORT', '22')
     monkeypatch.setenv('SFTP_USER', 'testuser')
@@ -59,7 +59,7 @@ def test_raises_when_env_var_is_not_string(monkeypatch):
 
 
 def test_init_succeeds_when_load_dotenv_returns_false(monkeypatch):
-    'Test that EnvLoader construction succeeds when no .env file is found.'
+    "Test that EnvLoader construction succeeds when no .env file is found."
     monkeypatch.setenv('SFTP_HOST', 'sftp.example.com')
     monkeypatch.setenv('SFTP_PORT', '22')
     monkeypatch.setenv('SFTP_USER', 'testuser')
@@ -73,7 +73,7 @@ def test_init_succeeds_when_load_dotenv_returns_false(monkeypatch):
 
 
 def test_non_sftp_attributes_work_via_normal_lookup(monkeypatch):
-    'Test that non-SFTP attributes are accessed normally.'
+    "Test that non-SFTP attributes are accessed normally."
     monkeypatch.setenv('SFTP_HOST', 'sftp.example.com')
     monkeypatch.setenv('SFTP_PORT', '22')
     monkeypatch.setenv('SFTP_USER', 'testuser')

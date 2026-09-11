@@ -15,6 +15,9 @@ from sftp_file_transfer.components.generator_runner import (
 )
 from sftp_file_transfer.components.history_tracker import HistoryTracker
 from sftp_file_transfer.components.logger_setup import setup_logger
+from sftp_file_transfer.components.nfce_config import NfceConfig
+from sftp_file_transfer.components.nfce_db_client import build_engine
+from sftp_file_transfer.components.nfce_generator import run_nfce_extraction
 from sftp_file_transfer.components.sftp_manager import (
     SFTPManager,
     SFTPManagerConfig,
@@ -74,6 +77,63 @@ def select_files_to_send(
     return list(combined.values())
 
 
+def run_folio_generation_step() -> None:
+    """Run the folio-generation step.
+
+    Prefers the in-house NFCe DB extraction (`NfceConfig` +
+    `run_nfce_extraction`) when NFCe DB env vars are configured; falls
+    back to the legacy PowerShell script (`GENERATOR_SCRIPT_PATH`) for
+    sites that haven't migrated yet. Does nothing if neither is
+    configured. Any failure is logged, never raised, so the send step
+    still runs afterwards.
+    """
+    try:
+        nfce_config = NfceConfig()
+    except ValueError:
+        nfce_config = None
+
+    if nfce_config is not None:
+        try:
+            engine = build_engine(
+                host=nfce_config.nfce_db_host,
+                port=int(nfce_config.nfce_db_port),
+                database=nfce_config.nfce_db_name,
+                user=nfce_config.nfce_db_user,
+                password=nfce_config.nfce_db_password,
+            )
+            summary = run_nfce_extraction(
+                engine,
+                nfce_config.nfce_output_path,
+                nfce_config.nfce_lookback_days,
+            )
+            logger.info(
+                'NFCe extraction summary: total=%s generated=%s '
+                'cancellations=%s no_protocol=%s skipped=%s errors=%s',
+                summary.total,
+                summary.generated,
+                summary.cancellations,
+                summary.no_protocol,
+                summary.skipped,
+                summary.errors,
+            )
+        except Exception as e:
+            logger.error(f'NFCe extraction step failed: {e}')
+        return
+
+    generator_script = os.getenv('GENERATOR_SCRIPT_PATH')
+    if generator_script:
+        generator_timeout = os.getenv('GENERATOR_TIMEOUT_SECONDS')
+        try:
+            run_generator_script(
+                generator_script,
+                timeout_seconds=(
+                    int(generator_timeout) if generator_timeout else None
+                ),
+            )
+        except Exception as e:
+            logger.error(f'Folio generation step failed: {e}')
+
+
 @group.task(
     trigger=Every(
         seconds=POLL_INTERVAL_SECONDS,
@@ -83,18 +143,7 @@ def select_files_to_send(
 def scheduled_task():
     print('Starting scheduled SFTP file transfer cycle...')
     try:
-        generator_script = os.getenv('GENERATOR_SCRIPT_PATH')
-        generator_timeout = os.getenv('GENERATOR_TIMEOUT_SECONDS')
-        if generator_script:
-            try:
-                run_generator_script(
-                    generator_script,
-                    timeout_seconds=(
-                        int(generator_timeout) if generator_timeout else None
-                    ),
-                )
-            except Exception as e:
-                logger.error(f'Folio generation step failed: {e}')
+        run_folio_generation_step()
 
         env = EnvLoader()
         config = SFTPManagerConfig(

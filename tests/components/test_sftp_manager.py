@@ -352,16 +352,20 @@ def test_connect_uses_key_based_auth_when_key_filepath_set(tmp_path):
     mock_transport = MagicMock()
     mock_sftp = MagicMock()
 
-    with patch(
-        'sftp_file_transfer.components.sftp_manager.RSAKey.from_private_key_file',
-        return_value=mock_key,
-    ) as mock_from_key, patch(
-        'sftp_file_transfer.components.sftp_manager.Transport',
-        return_value=mock_transport,
-    ) as mock_transport_class, patch(
-        'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
-        return_value=mock_sftp,
-    ) as mock_from_transport:
+    with (
+        patch(
+            'sftp_file_transfer.components.sftp_manager.RSAKey.from_private_key_file',
+            return_value=mock_key,
+        ) as mock_from_key,
+        patch(
+            'sftp_file_transfer.components.sftp_manager.Transport',
+            return_value=mock_transport,
+        ) as mock_transport_class,
+        patch(
+            'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
+            return_value=mock_sftp,
+        ) as mock_from_transport,
+    ):
         sftp_manager = SFTPManager(config)
         sftp_manager._connect()
 
