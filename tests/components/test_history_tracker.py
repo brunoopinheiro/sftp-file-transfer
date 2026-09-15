@@ -2,9 +2,10 @@ import os
 import sqlite3
 from datetime import date, datetime, timedelta
 
-import pytest
-
-from sftp_file_transfer.components.history_tracker import HistoryTracker
+from sftp_file_transfer.components.history_tracker import (
+    HistoryTracker,
+    SendHistory,
+)
 
 
 def _set_mtime(file_path, when):
@@ -47,14 +48,14 @@ def test_record_attempt_success_sets_sent_true_and_sent_at(tmp_path):
     with HistoryTracker(db_path) as tracker:
         tracker.record_attempt(file_path, success=True)
 
-        row = tracker._conn.execute(
-            'SELECT * FROM send_history WHERE path_hash = ?',
-            (HistoryTracker.hash_path(file_path),),
-        ).fetchone()
+        row = tracker._session.get(
+            SendHistory,
+            HistoryTracker.hash_path(file_path),
+        )
 
-        assert row['sent'] == 1
-        assert row['sent_at'] is not None
-        assert row['last_error'] is None
+        assert row.sent == 1
+        assert row.sent_at is not None
+        assert row.last_error is None
 
 
 def test_record_attempt_failure_sets_sent_false_and_last_error(tmp_path):
@@ -65,17 +66,19 @@ def test_record_attempt_failure_sets_sent_false_and_last_error(tmp_path):
 
     with HistoryTracker(db_path) as tracker:
         tracker.record_attempt(
-            file_path, success=False, error='connection lost',
+            file_path,
+            success=False,
+            error='connection lost',
         )
 
-        row = tracker._conn.execute(
-            'SELECT * FROM send_history WHERE path_hash = ?',
-            (HistoryTracker.hash_path(file_path),),
-        ).fetchone()
+        row = tracker._session.get(
+            SendHistory,
+            HistoryTracker.hash_path(file_path),
+        )
 
-        assert row['sent'] == 0
-        assert row['last_error'] == 'connection lost'
-        assert row['sent_at'] is None
+        assert row.sent == 0
+        assert row.last_error == 'connection lost'
+        assert row.sent_at is None
 
 
 def test_record_attempt_upsert_increments_attempts_on_retry(tmp_path):
@@ -88,14 +91,14 @@ def test_record_attempt_upsert_increments_attempts_on_retry(tmp_path):
         tracker.record_attempt(file_path, success=False, error='timeout')
         tracker.record_attempt(file_path, success=True)
 
-        row = tracker._conn.execute(
-            'SELECT * FROM send_history WHERE path_hash = ?',
-            (HistoryTracker.hash_path(file_path),),
-        ).fetchone()
+        row = tracker._session.get(
+            SendHistory,
+            HistoryTracker.hash_path(file_path),
+        )
 
         expected_attempts = 2
-        assert row['attempts'] == expected_attempts
-        assert row['sent'] == 1
+        assert row.attempts == expected_attempts
+        assert row.sent == 1
 
 
 def test_get_last_sent_date_returns_none_when_empty(tmp_path):
@@ -138,16 +141,52 @@ def test_get_pending_failed_files_returns_only_unsent_rows(tmp_path):
         assert pending == [failed_file.resolve()]
 
 
-def test_context_manager_commits_and_closes_connection(tmp_path):
-    """Test that the connection is closed after exiting the context."""
+def test_get_sent_hashes_returns_empty_set_when_empty(tmp_path):
+    """Test get_sent_hashes on an empty database."""
     db_path = tmp_path / 'history.db'
 
     with HistoryTracker(db_path) as tracker:
-        conn_ref = tracker._conn
+        assert tracker.get_sent_hashes() == set()
 
-    assert tracker._conn is None
-    with pytest.raises(sqlite3.ProgrammingError):
-        conn_ref.execute('SELECT 1')
+
+def test_get_sent_hashes_returns_only_sent_rows(tmp_path):
+    """Test get_sent_hashes excludes failed/pending rows."""
+    db_path = tmp_path / 'history.db'
+    sent_file = tmp_path / 'sent.txt'
+    failed_file = tmp_path / 'failed.txt'
+    sent_file.touch()
+    failed_file.touch()
+
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(sent_file, success=True)
+        tracker.record_attempt(failed_file, success=False, error='oops')
+
+        assert tracker.get_sent_hashes() == {
+            HistoryTracker.hash_path(sent_file),
+        }
+
+
+def test_context_manager_commits_and_clears_session(tmp_path):
+    """Test that the session is committed and cleared after exiting the
+    context, with data durably persisted for a fresh tracker."""
+    db_path = tmp_path / 'history.db'
+    file_path = tmp_path / 'file1.txt'
+    file_path.touch()
+
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(file_path, success=True)
+        session_ref = tracker._session
+
+    assert tracker._session is None
+    assert not session_ref.is_active or session_ref.in_transaction() is False
+
+    with HistoryTracker(db_path) as reopened:
+        row = reopened._session.get(
+            SendHistory,
+            HistoryTracker.hash_path(file_path),
+        )
+        assert row is not None
+        assert row.sent == 1
 
 
 def test_list_records_returns_all_when_no_filter(tmp_path):
@@ -182,7 +221,7 @@ def test_list_records_filters_by_sent_true(tmp_path):
 
         rows = tracker.list_records(sent=True)
 
-        assert [r['file_name'] for r in rows] == ['sent.txt']
+        assert [r.file_name for r in rows] == ['sent.txt']
 
 
 def test_list_records_filters_by_sent_false(tmp_path):
@@ -199,7 +238,7 @@ def test_list_records_filters_by_sent_false(tmp_path):
 
         rows = tracker.list_records(sent=False)
 
-        assert [r['file_name'] for r in rows] == ['failed.txt']
+        assert [r.file_name for r in rows] == ['failed.txt']
 
 
 def test_list_records_filters_by_date_range(tmp_path):
@@ -225,7 +264,7 @@ def test_list_records_filters_by_date_range(tmp_path):
             until=today.date(),
         )
 
-        assert {r['file_name'] for r in rows} == {'mid.txt', 'new.txt'}
+        assert {r.file_name for r in rows} == {'mid.txt', 'new.txt'}
 
 
 def test_list_records_orders_by_file_date_desc(tmp_path):
@@ -244,7 +283,7 @@ def test_list_records_orders_by_file_date_desc(tmp_path):
 
         rows = tracker.list_records()
 
-        assert [r['file_name'] for r in rows] == ['new.txt', 'old.txt']
+        assert [r.file_name for r in rows] == ['new.txt', 'old.txt']
 
 
 def test_get_summary_on_empty_db_returns_zero_counts_and_none_dates(
@@ -322,7 +361,7 @@ def test_find_records_matches_by_full_hash(tmp_path):
 
         found = tracker.find_records(HistoryTracker.hash_path(file_path))
 
-        assert [r['file_name'] for r in found] == ['file1.txt']
+        assert [r.file_name for r in found] == ['file1.txt']
 
 
 def test_find_records_matches_by_path_substring_case_insensitive(tmp_path):
@@ -336,7 +375,7 @@ def test_find_records_matches_by_path_substring_case_insensitive(tmp_path):
 
         found = tracker.find_records('file1.txt')
 
-        assert [r['file_name'] for r in found] == ['File1.txt']
+        assert [r.file_name for r in found] == ['File1.txt']
 
 
 def test_find_records_returns_empty_for_no_match(tmp_path):
@@ -363,9 +402,9 @@ def test_reset_record_flips_sent_to_zero_without_touching_attempts_or_error(
         expected_len = 1
         assert len(updated) == expected_len
         row = updated[0]
-        assert row['sent'] == 0
-        assert row['attempts'] == expected_len
-        assert row['last_error'] == 'boom'
+        assert row.sent == 0
+        assert row.attempts == expected_len
+        assert row.last_error == 'boom'
 
 
 def test_reset_record_clears_sent_at(tmp_path):
@@ -379,7 +418,7 @@ def test_reset_record_clears_sent_at(tmp_path):
 
         updated = tracker.reset_record(HistoryTracker.hash_path(file_path))
 
-        assert updated[0]['sent_at'] is None
+        assert updated[0].sent_at is None
 
 
 def test_reset_record_on_unknown_identifier_returns_empty_list(tmp_path):
@@ -410,4 +449,4 @@ def test_reset_record_bulk_matches_multiple_rows_by_shared_substring(
 
         expected_len = 2
         assert len(updated) == expected_len
-        assert all(row['sent'] == 0 for row in updated)
+        assert all(row.sent == 0 for row in updated)
