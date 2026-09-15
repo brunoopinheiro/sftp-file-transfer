@@ -4,7 +4,7 @@ Automated fiscal-XML (NFC-e) generation and SFTP delivery for hotel-site servers
 
 This project replaces a manual/PowerShell workflow with a single tool that:
 
-- Extracts NFC-e fiscal XML documents directly from the Symphony/CAPS MySQL database (`FCR_INVOICE_DATA`), or (as a fallback) runs a legacy PowerShell generator script.
+- Extracts NFC-e fiscal XML documents directly from the Symphony/CAPS MySQL database (`FCR_INVOICE_DATA`).
 - Uploads the generated files to a remote server over SFTP.
 - Keeps a local SQLite ledger of what has already been sent, so nothing is re-sent and nothing is lost — failed uploads are automatically retried on the next cycle.
 - Can run once (one-off CLI) or forever (a scheduled loop, packaged as a Windows `.exe` meant to be left running on a hotel's server).
@@ -24,10 +24,7 @@ There are three independent entry points, each with its own executable:
 
 Every cycle, `sftp-file-transfer-scheduled` does two things, in order:
 
-1. **Generation.** Tries three strategies, in this priority order:
-   1. If the `NFCE_DB_*` / `NFCE_OUTPUT_PATH` environment variables are configured, it connects directly to the Symphony/CAPS MySQL database and extracts pending NFC-e documents itself (authorized invoices, cancellations, and no-protocol documents) as XML files — no external script involved.
-   2. Otherwise, if `GENERATOR_SCRIPT_PATH` is set, it falls back to running that legacy PowerShell script (kept for hotel sites that haven't been migrated to the direct-DB extraction yet).
-   3. If neither is configured, generation is skipped entirely (send-only mode).
+1. **Generation.** If the `NFCE_DB_*` / `NFCE_OUTPUT_PATH` environment variables are configured, it connects directly to the Symphony/CAPS MySQL database and extracts pending NFC-e documents itself (authorized invoices, cancellations, and no-protocol documents) as XML files. If they aren't configured, generation is skipped entirely (send-only mode).
 
    A generation failure is logged but never blocks step 2 — files that already exist locally still get sent.
 
@@ -37,7 +34,7 @@ Both steps' outcomes (success, failure, per-file errors) are logged to a rotatin
 
 ## Requirements
 
-- Windows (the executables are built for Windows only; PowerShell fallback generation is Windows-specific too).
+- Windows (the executables are built for Windows only).
 - Network access from the server to both the SFTP target and (if using direct-DB generation) the Symphony/CAPS MySQL database.
 - [Poetry](https://python-poetry.org/) — only needed for development/building, not for running the final `.exe`.
 
@@ -103,21 +100,11 @@ NFCE_OUTPUT_PATH="C:/path/to/dir1"
 NFCE_LOOKBACK_DAYS=5
 ```
 
-- All six of `NFCE_DB_HOST`/`NFCE_DB_PORT`/`NFCE_DB_NAME`/`NFCE_DB_USER`/`NFCE_DB_PASSWORD`/`NFCE_OUTPUT_PATH` are required together — if any is missing, this strategy is skipped and the tool falls back to option B.
+- All six of `NFCE_DB_HOST`/`NFCE_DB_PORT`/`NFCE_DB_NAME`/`NFCE_DB_USER`/`NFCE_DB_PASSWORD`/`NFCE_OUTPUT_PATH` are required together — if any is missing, generation is skipped entirely (send-only mode).
 - `NFCE_OUTPUT_PATH` should normally be one of the directories listed in `LOCAL_PATH`, so generated files get picked up by the send step.
 - `NFCE_LOOKBACK_DAYS`: optional, defaults to `5` — how many days back to look for pending invoices on each run.
 
-### Generation — option B: legacy PowerShell script (fallback)
-
-```dotenv
-GENERATOR_SCRIPT_PATH="C:/path/to/generate_folios.ps1"
-GENERATOR_TIMEOUT_SECONDS=60
-```
-
-- `GENERATOR_SCRIPT_PATH`: optional; only used if the `NFCE_DB_*` variables above are not configured.
-- `GENERATOR_TIMEOUT_SECONDS`: optional; if unset, the script has no timeout.
-
-> If this program takes over invoking generation (either strategy), disable any existing Windows Task Scheduler entry for the old generator script to avoid running it twice.
+> If this program takes over invoking generation, disable any existing Windows Task Scheduler entry for the old generator script to avoid running it twice.
 
 ## Running from source (Poetry)
 
@@ -184,7 +171,7 @@ The tool is deployed generically: build once, then copy the relevant executable(
 1. Copy the built `.exe`(s) from `dist/` to a folder on the target server (e.g. `C:\SFTP`).
 2. Place a `.env` file in that same folder with the variables documented above, tailored to that hotel's paths/credentials.
 3. Make sure the local directories referenced by `LOCAL_PATH` / `NFCE_OUTPUT_PATH` exist and are writable.
-4. If a legacy PowerShell generator was previously scheduled via Windows Task Scheduler for that site, disable that scheduled task once this tool takes over generation, to avoid double-running it.
+4. If a legacy PowerShell generator was previously scheduled via Windows Task Scheduler for that site, disable that scheduled task once this tool takes over generation via direct-DB extraction, to avoid double-running it.
 
 ### Option 1 — long-running scheduled process (recommended)
 

@@ -10,9 +10,6 @@ from aioclock.group import Group
 
 from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.file_manager import FileManager
-from sftp_file_transfer.components.generator_runner import (
-    run_generator_script,
-)
 from sftp_file_transfer.components.history_tracker import HistoryTracker
 from sftp_file_transfer.components.logger_setup import setup_logger
 from sftp_file_transfer.components.nfce_config import NfceConfig
@@ -80,58 +77,44 @@ def select_files_to_send(
 def run_folio_generation_step() -> None:
     """Run the folio-generation step.
 
-    Prefers the in-house NFCe DB extraction (`NfceConfig` +
-    `run_nfce_extraction`) when NFCe DB env vars are configured; falls
-    back to the legacy PowerShell script (`GENERATOR_SCRIPT_PATH`) for
-    sites that haven't migrated yet. Does nothing if neither is
-    configured. Any failure is logged, never raised, so the send step
-    still runs afterwards.
+    Runs the in-house NFCe DB extraction (`NfceConfig` +
+    `run_nfce_extraction`) when NFCe DB env vars are configured. Does
+    nothing (logs a warning) if they aren't. Any failure is logged,
+    never raised, so the send step still runs afterwards.
     """
     try:
         nfce_config = NfceConfig()
     except ValueError:
-        nfce_config = None
-
-    if nfce_config is not None:
-        try:
-            engine = build_engine(
-                host=nfce_config.nfce_db_host,
-                port=int(nfce_config.nfce_db_port),
-                database=nfce_config.nfce_db_name,
-                user=nfce_config.nfce_db_user,
-                password=nfce_config.nfce_db_password,
-            )
-            summary = run_nfce_extraction(
-                engine,
-                nfce_config.nfce_output_path,
-                nfce_config.nfce_lookback_days,
-            )
-            logger.info(
-                'NFCe extraction summary: total=%s generated=%s '
-                'cancellations=%s no_protocol=%s skipped=%s errors=%s',
-                summary.total,
-                summary.generated,
-                summary.cancellations,
-                summary.no_protocol,
-                summary.skipped,
-                summary.errors,
-            )
-        except Exception as e:
-            logger.error(f'NFCe extraction step failed: {e}')
+        logger.warning(
+            'NFCe DB env vars not configured; skipping generation step.',
+        )
         return
 
-    generator_script = os.getenv('GENERATOR_SCRIPT_PATH')
-    if generator_script:
-        generator_timeout = os.getenv('GENERATOR_TIMEOUT_SECONDS')
-        try:
-            run_generator_script(
-                generator_script,
-                timeout_seconds=(
-                    int(generator_timeout) if generator_timeout else None
-                ),
-            )
-        except Exception as e:
-            logger.error(f'Folio generation step failed: {e}')
+    try:
+        engine = build_engine(
+            host=nfce_config.nfce_db_host,
+            port=int(nfce_config.nfce_db_port),
+            database=nfce_config.nfce_db_name,
+            user=nfce_config.nfce_db_user,
+            password=nfce_config.nfce_db_password,
+        )
+        summary = run_nfce_extraction(
+            engine,
+            nfce_config.nfce_output_path,
+            nfce_config.nfce_lookback_days,
+        )
+        logger.info(
+            'NFCe extraction summary: total=%s generated=%s '
+            'cancellations=%s no_protocol=%s skipped=%s errors=%s',
+            summary.total,
+            summary.generated,
+            summary.cancellations,
+            summary.no_protocol,
+            summary.skipped,
+            summary.errors,
+        )
+    except Exception as e:
+        logger.error(f'NFCe extraction step failed: {e}')
 
 
 @group.task(

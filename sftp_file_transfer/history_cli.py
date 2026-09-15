@@ -1,5 +1,4 @@
 import os
-import sqlite3
 from datetime import date
 from typing import List, Optional
 
@@ -9,7 +8,10 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from typer import Argument, Context, Option, Typer
 
-from sftp_file_transfer.components.history_tracker import HistoryTracker
+from sftp_file_transfer.components.history_tracker import (
+    HistoryTracker,
+    SendHistory,
+)
 
 app = Typer()
 console = Console()
@@ -32,14 +34,14 @@ def _resolve_db_path(db: Optional[str]) -> str:
 
 
 def _render_records_table(
-    rows: List[sqlite3.Row],
+    rows: List[SendHistory],
     title: str = 'Send History',
     show_error: bool = False,
 ) -> None:
     """Render a table of send-history records to the console.
 
     Args:
-        rows: List of sqlite3.Row objects from HistoryTracker.
+        rows: List of SendHistory ORM records from HistoryTracker.
         title: Title to display above the table.
         show_error: Whether to include error columns.
 
@@ -56,19 +58,19 @@ def _render_records_table(
         table.add_column('Last Attempt')
 
     for row in rows:
-        sent = bool(row['sent'])
+        sent = bool(row.sent)
         status = '[green]sent[/]' if sent else '[red]failed[/]'
         style = 'dim' if sent else None
         cells = [
             status,
-            row['file_name'],
-            row['file_date'],
-            str(row['attempts']),
+            row.file_name,
+            row.file_date,
+            str(row.attempts),
         ]
         if show_error:
             cells += [
-                row['last_error'] or '-',
-                row['last_attempt_at'] or '-',
+                row.last_error or '-',
+                row.last_attempt_at or '-',
             ]
         table.add_row(*cells, style=style)
 

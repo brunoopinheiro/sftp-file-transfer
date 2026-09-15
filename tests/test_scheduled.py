@@ -148,15 +148,13 @@ def test_generation_step_prefers_nfce_extraction_when_configured(
     monkeypatch,
 ):
     """Test that run_folio_generation_step calls the in-house NFCe
-    extraction (not the legacy PS1 script) when NFCE_DB_* env vars are
-    configured, even if GENERATOR_SCRIPT_PATH is also set."""
+    extraction when NFCE_DB_* env vars are configured."""
     monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
     monkeypatch.setenv('NFCE_DB_PORT', '3306')
     monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
     monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
     monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
     monkeypatch.setenv('NFCE_OUTPUT_PATH', 'C:/output')
-    monkeypatch.setenv('GENERATOR_SCRIPT_PATH', 'C:/scripts/generate.ps1')
 
     fake_engine = MagicMock()
     fake_summary = NfceExtractionSummary(total=3, generated=2, skipped=1)
@@ -170,9 +168,6 @@ def test_generation_step_prefers_nfce_extraction_when_configured(
             'sftp_file_transfer.scheduled.run_nfce_extraction',
             return_value=fake_summary,
         ) as mock_run_extraction,
-        patch(
-            'sftp_file_transfer.scheduled.run_generator_script',
-        ) as mock_generator_script,
     ):
         run_folio_generation_step()
 
@@ -188,46 +183,11 @@ def test_generation_step_prefers_nfce_extraction_when_configured(
         'C:/output',
         5,
     )
-    mock_generator_script.assert_not_called()
 
 
-def test_generation_step_falls_back_to_legacy_script_when_nfce_unset(
-    monkeypatch,
-):
-    """Test that run_folio_generation_step falls back to the legacy
-    PowerShell script when NFCE_DB_* env vars are not configured."""
-    for var in (
-        'NFCE_DB_HOST',
-        'NFCE_DB_PORT',
-        'NFCE_DB_NAME',
-        'NFCE_DB_USER',
-        'NFCE_DB_PASSWORD',
-        'NFCE_OUTPUT_PATH',
-    ):
-        monkeypatch.setenv(var, '')
-    monkeypatch.setenv('GENERATOR_SCRIPT_PATH', 'C:/scripts/generate.ps1')
-    monkeypatch.delenv('GENERATOR_TIMEOUT_SECONDS', raising=False)
-
-    with (
-        patch(
-            'sftp_file_transfer.scheduled.run_nfce_extraction',
-        ) as mock_run_extraction,
-        patch(
-            'sftp_file_transfer.scheduled.run_generator_script',
-        ) as mock_generator_script,
-    ):
-        run_folio_generation_step()
-
-    mock_run_extraction.assert_not_called()
-    mock_generator_script.assert_called_once_with(
-        'C:/scripts/generate.ps1',
-        timeout_seconds=None,
-    )
-
-
-def test_generation_step_does_nothing_when_neither_configured(monkeypatch):
+def test_generation_step_does_nothing_when_nfce_not_configured(monkeypatch):
     """Test that run_folio_generation_step is a no-op (no error) when
-    neither NFCe DB env vars nor GENERATOR_SCRIPT_PATH are set."""
+    NFCe DB env vars are not set."""
     for var in (
         'NFCE_DB_HOST',
         'NFCE_DB_PORT',
@@ -237,20 +197,13 @@ def test_generation_step_does_nothing_when_neither_configured(monkeypatch):
         'NFCE_OUTPUT_PATH',
     ):
         monkeypatch.setenv(var, '')
-    monkeypatch.delenv('GENERATOR_SCRIPT_PATH', raising=False)
 
-    with (
-        patch(
-            'sftp_file_transfer.scheduled.run_nfce_extraction',
-        ) as mock_run_extraction,
-        patch(
-            'sftp_file_transfer.scheduled.run_generator_script',
-        ) as mock_generator_script,
-    ):
+    with patch(
+        'sftp_file_transfer.scheduled.run_nfce_extraction',
+    ) as mock_run_extraction:
         run_folio_generation_step()
 
     mock_run_extraction.assert_not_called()
-    mock_generator_script.assert_not_called()
 
 
 def test_generation_step_logs_and_swallows_nfce_extraction_failure(
@@ -265,26 +218,19 @@ def test_generation_step_logs_and_swallows_nfce_extraction_failure(
     monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
     monkeypatch.setenv('NFCE_OUTPUT_PATH', 'C:/output')
 
-    with (
-        patch(
-            'sftp_file_transfer.scheduled.build_engine',
-            side_effect=RuntimeError('cannot connect'),
-        ),
-        patch(
-            'sftp_file_transfer.scheduled.run_generator_script',
-        ) as mock_generator_script,
+    with patch(
+        'sftp_file_transfer.scheduled.build_engine',
+        side_effect=RuntimeError('cannot connect'),
     ):
         # Should not raise.
         run_folio_generation_step()
 
-    mock_generator_script.assert_not_called()
 
-
-def test_scheduled_task_still_sends_when_generator_fails(
+def test_scheduled_task_still_sends_when_generation_fails(
     tmp_path,
     monkeypatch,
 ):
-    """Test that a generator-script failure is logged but does not
+    """Test that an NFCe generation failure is logged but does not
     prevent the send step from running."""
     source_dir = tmp_path / 'source'
     source_dir.mkdir()
@@ -298,9 +244,13 @@ def test_scheduled_task_still_sends_when_generator_fails(
     monkeypatch.setenv('LOCAL_PATH', str(source_dir))
     monkeypatch.setenv('REMOTE_PATH', '/uploads')
     monkeypatch.setenv('HISTORY_DB_PATH', str(tmp_path / 'history.db'))
-    monkeypatch.setenv('GENERATOR_SCRIPT_PATH', 'C:/scripts/generate.ps1')
+    monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
+    monkeypatch.setenv('NFCE_DB_PORT', '3306')
+    monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
+    monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
+    monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
+    monkeypatch.setenv('NFCE_OUTPUT_PATH', 'C:/output')
     monkeypatch.delenv('FILE_EXTENSION', raising=False)
-    monkeypatch.delenv('GENERATOR_TIMEOUT_SECONDS', raising=False)
 
     mock_sftp = MagicMock()
     mock_manager = MagicMock()
@@ -308,9 +258,9 @@ def test_scheduled_task_still_sends_when_generator_fails(
 
     with (
         patch(
-            'sftp_file_transfer.scheduled.run_generator_script',
+            'sftp_file_transfer.scheduled.build_engine',
             side_effect=RuntimeError('generation failed'),
-        ) as mock_generator,
+        ) as mock_build_engine,
         patch(
             'sftp_file_transfer.scheduled.SFTPManager',
             return_value=mock_manager,
@@ -318,7 +268,7 @@ def test_scheduled_task_still_sends_when_generator_fails(
     ):
         scheduled_task()
 
-    mock_generator.assert_called_once()
+    mock_build_engine.assert_called_once()
     mock_sftp.upload_file.assert_called_once_with(
         local_path=pending_file,
         remote_path=f'/uploads/{pending_file.name}',
@@ -340,7 +290,6 @@ def test_scheduled_task_swallows_missing_local_and_remote_path_env(
     # get reloaded here, silently defeating this test.
     monkeypatch.setenv('LOCAL_PATH', '')
     monkeypatch.setenv('REMOTE_PATH', '')
-    monkeypatch.delenv('GENERATOR_SCRIPT_PATH', raising=False)
 
     # Should not raise - the ValueError for missing LOCAL_PATH/REMOTE_PATH
     # is caught by the function's outer except and logged
@@ -369,7 +318,6 @@ def test_scheduled_task_continues_after_one_file_upload_fails(
     monkeypatch.setenv('REMOTE_PATH', '/uploads')
     monkeypatch.setenv('HISTORY_DB_PATH', str(tmp_path / 'history.db'))
     monkeypatch.delenv('FILE_EXTENSION', raising=False)
-    monkeypatch.delenv('GENERATOR_SCRIPT_PATH', raising=False)
 
     def upload_side_effect(local_path, remote_path):
         """Raise for fail.txt, succeed for ok.txt."""
@@ -400,10 +348,10 @@ def test_scheduled_task_continues_after_one_file_upload_fails(
     # fail.txt should have sent=0 and a non-null error
     assert len(fail_records) == 1
     fail_record = fail_records[0]
-    assert fail_record['sent'] == 0
-    assert fail_record['last_error'] is not None
+    assert fail_record.sent == 0
+    assert fail_record.last_error is not None
 
     # ok.txt should have sent=1
     assert len(ok_records) == 1
     ok_record = ok_records[0]
-    assert ok_record['sent'] == 1
+    assert ok_record.sent == 1
