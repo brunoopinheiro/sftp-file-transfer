@@ -201,6 +201,101 @@ def test_attach_command_launches_the_tui_when_daemon_running():
     mock_app.return_value.run.assert_called_once()
 
 
+def test_attach_skips_stop_verification_when_user_detached(tmp_path):
+    """Test _attach() does not verify/force-terminate the daemon when
+    the TUI exited via 'q' (detach), since it's meant to keep running."""
+    lock_path = tmp_path / 'monitor.lock'
+    lock_path.write_text('{"pid": 123, "port": 4444}', encoding='utf-8')
+
+    with (
+        patch(
+            'sftp_file_transfer.monitor.cli._running_lock_info',
+            return_value={'pid': 123, 'port': 4444},
+        ),
+        patch('sftp_file_transfer.monitor.cli.DaemonClient'),
+        patch('sftp_file_transfer.monitor.cli.MonitorApp') as mock_app,
+        patch(
+            'sftp_file_transfer.monitor.cli._wait_for_exit',
+        ) as mock_wait,
+        patch(
+            'sftp_file_transfer.monitor.cli._terminate_pid',
+        ) as mock_terminate,
+        patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
+    ):
+        mock_app.return_value.detached = True
+        result = runner.invoke(cli.app, ['attach'])
+
+    assert result.exit_code == 0
+    mock_wait.assert_not_called()
+    mock_terminate.assert_not_called()
+    assert lock_path.exists()
+
+
+def test_attach_force_terminates_stuck_daemon_after_stop_and_quit(
+    tmp_path,
+):
+    """Test _attach() verifies the daemon actually exited after
+    Ctrl+Q (not detached), and force-terminates it if it's still
+    alive when the wait times out — the exact scenario reported: the
+    daemon receives 'stop' but is stuck finishing a cycle, so sending
+    the command alone is not proof it has exited."""
+    lock_path = tmp_path / 'monitor.lock'
+    lock_path.write_text('{"pid": 123, "port": 4444}', encoding='utf-8')
+
+    with (
+        patch(
+            'sftp_file_transfer.monitor.cli._running_lock_info',
+            return_value={'pid': 123, 'port': 4444},
+        ),
+        patch('sftp_file_transfer.monitor.cli.DaemonClient'),
+        patch('sftp_file_transfer.monitor.cli.MonitorApp') as mock_app,
+        patch(
+            'sftp_file_transfer.monitor.cli._wait_for_exit',
+            return_value=False,
+        ),
+        patch(
+            'sftp_file_transfer.monitor.cli._terminate_pid',
+        ) as mock_terminate,
+        patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
+    ):
+        mock_app.return_value.detached = False
+        result = runner.invoke(cli.app, ['attach'])
+
+    assert result.exit_code == 0
+    mock_terminate.assert_called_once_with(123)
+    assert not lock_path.exists()
+
+
+def test_attach_skips_terminate_when_daemon_exits_on_its_own(tmp_path):
+    """Test _attach() doesn't force-terminate when the daemon exits
+    gracefully within the wait window after Ctrl+Q."""
+    lock_path = tmp_path / 'monitor.lock'
+    lock_path.write_text('{"pid": 123, "port": 4444}', encoding='utf-8')
+
+    with (
+        patch(
+            'sftp_file_transfer.monitor.cli._running_lock_info',
+            return_value={'pid': 123, 'port': 4444},
+        ),
+        patch('sftp_file_transfer.monitor.cli.DaemonClient'),
+        patch('sftp_file_transfer.monitor.cli.MonitorApp') as mock_app,
+        patch(
+            'sftp_file_transfer.monitor.cli._wait_for_exit',
+            return_value=True,
+        ),
+        patch(
+            'sftp_file_transfer.monitor.cli._terminate_pid',
+        ) as mock_terminate,
+        patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
+    ):
+        mock_app.return_value.detached = False
+        result = runner.invoke(cli.app, ['attach'])
+
+    assert result.exit_code == 0
+    mock_terminate.assert_not_called()
+    assert not lock_path.exists()
+
+
 def test_stop_command_errors_when_no_daemon_running():
     """Test `stop` exits non-zero with a clear message if nothing runs."""
     with patch(
@@ -546,6 +641,43 @@ def test_run_daemon_command_starts_server_and_writes_lock(tmp_path):
         result = runner.invoke(cli.app, ['_run_daemon'])
 
     assert result.exit_code == 0
+    assert not lock_path.exists()
+
+
+def test_run_daemon_command_keeps_lock_file_until_run_forever_returns(
+    tmp_path,
+):
+    """Test the lock file survives stop() being called and is only
+    removed once run_forever() has actually finished — reproducing the
+    reported bug where stop/Ctrl+Q made the lock file vanish (and the
+    daemon become invisible to _running_lock_info) while the process
+    was still alive finishing a cycle."""
+    lock_path = tmp_path / 'monitor.lock'
+    db_path = tmp_path / 'history.db'
+    lock_file_existed_during_stop = False
+
+    class SlowStoppingDaemon(MonitorDaemon):
+        async def run_forever(self):
+            nonlocal lock_file_existed_during_stop
+            await self.stop()
+            lock_file_existed_during_stop = lock_path.exists()
+
+    with (
+        patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
+        patch(
+            'sftp_file_transfer.monitor.cli.DEFAULT_HISTORY_DB_PATH',
+            db_path,
+        ),
+        patch(
+            'sftp_file_transfer.monitor.cli.MonitorDaemon',
+            SlowStoppingDaemon,
+        ),
+    ):
+        result = runner.invoke(cli.app, ['_run_daemon'])
+
+    assert result.exit_code == 0
+    assert lock_file_existed_during_stop is True
+    assert not lock_path.exists()
 
 
 def test_main_callback_theme_option_saves_config(tmp_path):

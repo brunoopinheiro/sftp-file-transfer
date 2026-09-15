@@ -323,6 +323,29 @@ def test_server_sends_snapshot_then_streams_events_and_handles_commands(
             server.close()
             await server.wait_closed()
 
+
+def test_stop_signals_only_leaving_server_and_lock_file_intact(tmp_path):
+    """Test stop() only sets stopped=True — it must not close the
+    server or remove the lock file itself, since a cycle may still be
+    finishing on a worker thread and the process may not exit for a
+    while. Premature teardown here would make _running_lock_info()
+    unable to find the pid to verify/force-terminate later."""
+    daemon = _make_daemon(tmp_path)
+    daemon.write_lock_file(port=12345)
+
+    async def scenario():
+        server = await daemon.start_server()
+        await daemon.stop()
+
+        assert daemon.stopped is True
+        assert daemon.lock_path.exists()
+        assert server.is_serving()
+
+        server.close()
+        await server.wait_closed()
+
+    asyncio.run(scenario())
+
     asyncio.run(scenario())
 
 

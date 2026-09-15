@@ -407,12 +407,20 @@ class MonitorDaemon:
             await asyncio.sleep(1)
 
     async def stop(self) -> None:
-        """Stop the daemon: close the server and remove the lock file.
+        """Signal run_forever() to exit at its next opportunity.
+
+        Deliberately does *not* close the server or remove the lock
+        file here: `run_forever()` offloads each cycle to a worker
+        thread, so a cycle already in flight (e.g. blocked on a slow
+        SFTP connect) can keep the process alive for a while after
+        `stopped` is set. Tearing down the server/lock file immediately
+        would make the process invisible to `_running_lock_info()` —
+        no lock file means no pid to check or force-terminate — even
+        though it's still very much alive. The caller (`run_daemon_command`
+        in cli.py) tears both down in its `finally` block, once
+        `run_forever()` has actually returned.
 
         Returns:
             None.
         """
         self.stopped = True
-        if self._server is not None:
-            self._server.close()
-        self.remove_lock_file()

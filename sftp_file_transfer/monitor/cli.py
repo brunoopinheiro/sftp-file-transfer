@@ -232,6 +232,12 @@ def _attach(theme: Optional[str], lock_info: dict) -> None:
     process (possibly reattached long after the daemon started), so
     it can't rely on the daemon process having already loaded them.
 
+    If the user didn't explicitly detach (Ctrl+Q's "stop and quit"
+    rather than 'q'), verifies the daemon process actually exited
+    afterward and force-terminates it if not — mirroring stop_command,
+    since sending the daemon a `stop` command is not proof it has
+    actually finished exiting (see MonitorDaemon.stop's docstring).
+
     Args:
         theme: Theme name to activate, or None for the persisted one.
         lock_info: The daemon's {'pid': int, 'port': int}.
@@ -241,11 +247,20 @@ def _attach(theme: Optional[str], lock_info: dict) -> None:
     """
     EnvLoader()
     client = DaemonClient(lock_info['port'])
-    MonitorApp(
+    monitor_app = MonitorApp(
         client=client,
         history_db_path=DEFAULT_HISTORY_DB_PATH,
         theme_name=theme,
-    ).run()
+    )
+    monitor_app.run()
+
+    if not monitor_app.detached:
+        if not _wait_for_exit(
+            lock_info['pid'],
+            timeout=_STOP_WAIT_TIMEOUT_SEC,
+        ):
+            _terminate_pid(lock_info['pid'])
+        Path(DEFAULT_LOCK_PATH).unlink(missing_ok=True)
 
 
 @app.callback(invoke_without_command=True)
@@ -431,6 +446,7 @@ def run_daemon_command() -> None:
         finally:
             server.close()
             await server.wait_closed()
+            daemon.remove_lock_file()
 
     asyncio.run(_serve())
 
