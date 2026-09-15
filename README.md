@@ -9,6 +9,7 @@ This project replaces a manual/PowerShell workflow with a single tool that:
 - Keeps a local SQLite ledger of what has already been sent, so nothing is re-sent and nothing is lost — failed uploads are automatically retried on the next cycle.
 - Can run once (one-off CLI) or forever (a scheduled loop, packaged as a Windows `.exe` meant to be left running on a hotel's server).
 - Ships a companion CLI (`sftp_history`) to inspect and, if needed, manually reset entries in that ledger.
+- Ships a Textual TUI (`sftp_monitor`) for live-watching the scheduled generate → send cycle, with detach/reattach support so the scheduler keeps running in the background independently of the TUI.
 
 ## How it works
 
@@ -19,6 +20,7 @@ There are three independent entry points, each with its own executable:
 | `sftp_send` | One-off: send whatever files match right now, then exit. | `sftp_file_transfer/main.py` |
 | `sftp-file-transfer-scheduled` | Long-running: repeats a *generate → send* cycle forever, every `POLL_INTERVAL_SECONDS`. This is what should be left running on a hotel's server. | `sftp_file_transfer/scheduled.py` |
 | `sftp_history` | Inspect/reset the local send-history ledger. Interactive menu if run with no subcommand. | `sftp_file_transfer/history_cli.py` |
+| `sftp_monitor` | Live TUI dashboard for the scheduled generate → send cycle. Runs the scheduler itself (as a detachable background daemon) plus a Textual client that can attach/detach from it. | `sftp_file_transfer/monitor/` |
 
 ### The scheduled generate → send cycle
 
@@ -31,6 +33,26 @@ Every cycle, `sftp-file-transfer-scheduled` does two things, in order:
 2. **Send.** Scans each directory in `LOCAL_PATH`, and uploads over SFTP any file that isn't already recorded as `sent` in the local ledger (`HISTORY_DB_PATH`), plus retries anything that previously failed.
 
 Both steps' outcomes (success, failure, per-file errors) are logged to a rotating log file and, for sends, recorded per-attempt in the SQLite ledger.
+
+### The `sftp_monitor` TUI
+
+`sftp_monitor` runs the same generate → send cycle as `sftp-file-transfer-scheduled`, but wrapped in a Textual dashboard with three screens: **Dashboard** (live status, connection state, sent/failed/pending counts, a 7-day usage chart, and a live log), **History** (a searchable/filterable view of the send-history ledger), and **Help** (keybindings).
+
+Unlike the plain scheduled loop, `sftp_monitor` is Docker-style detachable: the scheduler runs as a background daemon process, and the TUI is just a client attached to it — closing the TUI (`q`) leaves the daemon running.
+
+- `SITE_NAME`: optional; the hotel site name shown in the Dashboard header. Defaults to blank if unset.
+
+```bash
+poetry run sftp_monitor              # start (or attach to) the daemon + TUI
+poetry run sftp_monitor --detach     # start the daemon only, no TUI (e.g. Task Scheduler)
+poetry run sftp_monitor attach       # attach a TUI to an already-running daemon
+poetry run sftp_monitor status       # check whether a daemon is running
+poetry run sftp_monitor stop         # stop the running daemon
+```
+
+Keybindings inside the TUI: `F1`/`F2`/`F3` switch screens, `R` forces a cycle now, `P` pauses/resumes log-follow, `/` focuses the History search box, `1`-`4` filter History by status (or click the buttons above the table), `Esc` clears History filters, `Q` detaches (does **not** stop the daemon), and `Ctrl+Q` stops the daemon and quits.
+
+Pass `--theme <name>` (on the default command or `attach`) to select a color theme — `nord` (default), `monokai`, `solarized-light`, or `high-contrast` — or switch it live from the in-app command palette (`Ctrl+P`). The chosen theme is persisted to `data/monitor_config.json`.
 
 ## Requirements
 
@@ -160,6 +182,7 @@ Then build whichever executable(s) you need:
 poetry run task build            # sftp_send        -> dist/sftp-file-transfer.exe
 poetry run task build_scheduled  # scheduled loop    -> dist/sftp-file-transfer-scheduled.exe
 poetry run task build_history    # sftp_history CLI  -> dist/sftp-file-transfer-history.exe
+poetry run task build_monitor    # sftp_monitor TUI  -> dist/sftp-file-transfer-monitor.exe
 ```
 
 Each task bundles the whole `sftp_file_transfer` package alongside the entry-point script, so the resulting `.exe` is fully self-contained.
