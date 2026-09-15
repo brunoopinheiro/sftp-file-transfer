@@ -811,6 +811,81 @@ def test_resend_lookup_lists_each_ambiguous_match_separately(tmp_path):
     _run(scenario())
 
 
+def test_resend_lookup_includes_never_attempted_local_files(
+    tmp_path,
+    monkeypatch,
+):
+    """Test a pasted identifier matching a file that's on disk but has
+    no ledger row yet (never attempted) still shows up as PENDING,
+    instead of being reported as not found."""
+    db_path = tmp_path / 'history.db'
+    source_dir = tmp_path / 'source'
+    source_dir.mkdir()
+    never_attempted = source_dir / 'never_attempted.txt'
+    never_attempted.touch()
+    monkeypatch.setenv('LOCAL_PATH', str(source_dir))
+    monkeypatch.setenv('FILE_EXTENSION', '')
+
+    app = MonitorApp(history_db_path=db_path)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'never_attempted'
+            await pilot.click('#lookup-button')
+            results = app.screen.query_one('#resend-results', SelectionList)
+            assert results.option_count == 1
+            status = str(
+                app.screen.query_one('#resend-status').content,
+            )
+            assert '1 matched' in status
+            assert '0 not found' in status
+
+    _run(scenario())
+
+
+def test_resend_selected_includes_pending_file_in_forced_cycle(
+    tmp_path,
+    monkeypatch,
+):
+    """Test resending a never-attempted local file is a safe no-op on
+    the ledger (nothing to reset) but still triggers a force_run so
+    the pending file gets picked up immediately."""
+    db_path = tmp_path / 'history.db'
+    source_dir = tmp_path / 'source'
+    source_dir.mkdir()
+    pending_file = source_dir / 'pending_only.txt'
+    pending_file.touch()
+    monkeypatch.setenv('LOCAL_PATH', str(source_dir))
+    monkeypatch.setenv('FILE_EXTENSION', '')
+
+    async def empty_stream():
+        return
+        yield  # pragma: no cover
+
+    mock_client = MagicMock()
+    mock_client.connect = AsyncMock()
+    mock_client.send_command = AsyncMock()
+    mock_client.state_stream = MagicMock(return_value=empty_stream())
+    app = MonitorApp(history_db_path=db_path, client=mock_client)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'pending_only.txt'
+            await pilot.click('#lookup-button')
+            await pilot.click('#resend-button')
+            await pilot.pause()
+
+    asyncio.run(scenario())
+
+    mock_client.send_command.assert_called_once_with({'cmd': 'force_run'})
+    with HistoryTracker(db_path) as tracker:
+        assert tracker.find_records('pending_only.txt') == []
+
+
 def test_resend_selected_resets_sent_record_and_forces_a_cycle(tmp_path):
     """Test resending an already-SENT match flips it back to pending
     and sends exactly one force_run command."""

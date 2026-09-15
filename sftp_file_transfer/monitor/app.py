@@ -693,11 +693,14 @@ class HistoryScreen(Screen):
 
 
 class ResendScreen(Screen):
-    """Paste a failure report, look it up in the ledger, and resend.
+    """Paste a failure report, look it up, and resend.
 
     Each pasted line may be a bare identifier (e.g. an invoice/access-key
-    token embedded in a filename) or a full filename; both resolve via
-    HistoryTracker.find_records()'s existing hash/substring matching.
+    token embedded in a filename) or a full filename. Lookup checks two
+    sources: the ledger, via HistoryTracker.find_records()'s existing
+    hash/substring matching (covers SENT/FAILED files); and LOCAL_PATH
+    directly, via HistoryScreen._scan_pending_files() (covers files that
+    were generated but never attempted at all — no ledger row yet).
     Resending a match — even one already marked SENT — resets it to
     pending and forces an immediate cycle, since the point of this
     screen is recovering files a downstream report says never arrived
@@ -797,12 +800,23 @@ class ResendScreen(Screen):
         matched_lines = 0
         not_found: List[str] = []
         with HistoryTracker(self.app.history_db_path) as tracker:
+            known_hashes = {
+                row.path_hash for row in tracker.list_records()
+            }
+            pending_files = HistoryScreen._scan_pending_files(known_hashes)
+
             for line in lines:
                 matches: List[SendHistory] = tracker.find_records(line)
-                if not matches:
+                pending_matches = [
+                    path
+                    for path in pending_files
+                    if line.lower() in path.name.lower()
+                ]
+                if not matches and not pending_matches:
                     not_found.append(line)
                     continue
                 matched_lines += 1
+
                 for row in matches:
                     status = 'SENT' if row.sent else 'FAILED'
                     style = HistoryScreen._history_status_style(
@@ -816,6 +830,20 @@ class ResendScreen(Screen):
                         f"  (matched '{line}')",
                     )
                     results.add_options([(label, row.path_hash, True)])
+
+                for path in pending_matches:
+                    style = HistoryScreen._history_status_style(
+                        'PENDING',
+                        theme,
+                    )
+                    label = Text.assemble(
+                        (path.name, ''),
+                        '  ',
+                        ('PENDING', style),
+                        f"  (matched '{line}')",
+                    )
+                    path_hash = HistoryTracker.hash_path(path)
+                    results.add_options([(label, path_hash, True)])
 
         summary = (
             f'{len(lines)} line(s) pasted, {matched_lines} matched, '
@@ -891,10 +919,12 @@ class HelpScreen(Screen):
             '',
             'RESEND SCREEN',
             '  Paste one identifier or filename per line, then:',
-            '  Ctrl+L    Look up every pasted line in the ledger',
+            '  Ctrl+L    Look up every pasted line (ledger + local files)',
             '  Ctrl+R    Resend the checked matches (forces a cycle)',
             '  A match already marked SENT is still reset and resent —',
             '  use this when a downstream report says it never arrived.',
+            '  A file with no ledger record yet (never attempted) still',
+            '  shows up as PENDING if it exists under LOCAL_PATH.',
         ],
     )
 

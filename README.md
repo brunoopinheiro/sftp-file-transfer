@@ -36,7 +36,7 @@ Both steps' outcomes (success, failure, per-file errors) are logged to a rotatin
 
 ### The `sftp_monitor` TUI
 
-`sftp_monitor` runs the same generate → send cycle as `sftp-file-transfer-scheduled`, but wrapped in a Textual dashboard with four screens: **Dashboard** (live status, connection state, sent/failed/pending counts, a 7-day usage chart, and a live log), **History** (a searchable/filterable view of the send-history ledger), **Resend** (paste a failure report — one filename or embedded identifier per line — look it up against the ledger, review the matches, and force an immediate resend; a match already marked SENT is still reset and resent, for when a downstream report says it never actually arrived), and **Help** (keybindings).
+`sftp_monitor` runs the same generate → send cycle as `sftp-file-transfer-scheduled`, but wrapped in a Textual dashboard with four screens: **Dashboard** (live status, connection state, sent/failed/pending counts, a 7-day usage chart, and a live log), **History** (a searchable/filterable view of the send-history ledger), **Resend** (paste a failure report — one filename or embedded identifier per line — look it up against both the ledger and LOCAL_PATH, review the matches, and force an immediate resend; a match already marked SENT is still reset and resent, for when a downstream report says it never actually arrived, and a file that was generated but never even attempted yet still resolves as PENDING), and **Help** (keybindings).
 
 Unlike the plain scheduled loop, `sftp_monitor` is Docker-style detachable: the scheduler runs as a background daemon process, and the TUI is just a client attached to it — closing the TUI (`q`) leaves the daemon running.
 
