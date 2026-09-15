@@ -214,3 +214,5 @@ __marimo__/
 implementation_todo_*
 extract_script.*
 README-Extrai-NFCe-CAPS.pdf
+demo_files/*
+NFC-e SFTP Delivery Monitor.html

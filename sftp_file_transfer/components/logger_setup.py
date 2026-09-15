@@ -12,7 +12,7 @@ from logging import (
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB
+MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 def setup_logger(

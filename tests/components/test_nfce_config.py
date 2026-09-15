@@ -1,5 +1,26 @@
 import pytest
+
 from sftp_file_transfer.components.nfce_config import NfceConfig
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_real_dotenv(monkeypatch, tmp_path):
+    """Point NfceConfig at an empty mock `.env` instead of the real one.
+
+    `NfceConfig.__init__` calls `load_dotenv(find_dotenv())`, which
+    fills in any env var absent from `os.environ` from the nearest
+    `.env` file it finds walking up from the cwd — including the
+    developer's real project `.env`. Without this, a test that
+    monkeypatch.delenv()'s a required var to assert it's "missing"
+    would silently pass or fail depending on whatever that real
+    `.env` happens to contain, rather than testing actual absence.
+    """
+    mock_env_path = tmp_path / '.env'
+    mock_env_path.write_text('', encoding='utf-8')
+    monkeypatch.setattr(
+        'sftp_file_transfer.components.nfce_config.find_dotenv',
+        lambda *args, **kwargs: str(mock_env_path),
+    )
 
 
 def test_reads_all_required_env_vars_successfully(monkeypatch):
