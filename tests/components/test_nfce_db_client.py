@@ -1,11 +1,12 @@
 from datetime import date
 
 import sqlalchemy as sa
+from sqlalchemy import Column, Date, Integer, MetaData, String, Table
+
 from sftp_file_transfer.components.nfce_db_client import (
     build_engine,
     fetch_pending_invoice_rows,
 )
-from sqlalchemy import Column, Date, Integer, MetaData, String, Table
 
 
 def test_build_engine_returns_pymysql_driver():
