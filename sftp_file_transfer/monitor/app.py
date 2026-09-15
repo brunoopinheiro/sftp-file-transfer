@@ -11,7 +11,16 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import Button, DataTable, Footer, Header, Input, Static
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    SelectionList,
+    Static,
+    TextArea,
+)
 
 from sftp_file_transfer.components.file_manager import FileManager
 from sftp_file_transfer.components.history_tracker import (
@@ -683,6 +692,180 @@ class HistoryScreen(Screen):
         self.refresh_table()
 
 
+class ResendScreen(Screen):
+    """Paste a failure report, look it up in the ledger, and resend.
+
+    Each pasted line may be a bare identifier (e.g. an invoice/access-key
+    token embedded in a filename) or a full filename; both resolve via
+    HistoryTracker.find_records()'s existing hash/substring matching.
+    Resending a match — even one already marked SENT — resets it to
+    pending and forces an immediate cycle, since the point of this
+    screen is recovering files a downstream report says never arrived
+    despite the local ledger believing otherwise.
+    """
+
+    DEFAULT_CSS = """
+    ResendScreen {
+        layout: vertical;
+    }
+
+    #resend-input-row {
+        height: 12;
+        margin: 1 1 0 1;
+    }
+
+    #resend-textarea {
+        width: 1fr;
+        border: round $primary;
+    }
+
+    #resend-actions {
+        width: 24;
+        height: auto;
+        margin-left: 1;
+    }
+
+    #resend-actions Button {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #resend-results {
+        margin: 1;
+        border: round $primary;
+        height: 1fr;
+    }
+
+    #resend-status {
+        margin: 0 1 1 1;
+        height: auto;
+    }
+    """
+
+    BINDINGS = [
+        Binding('ctrl+l', 'lookup', 'Lookup'),
+        Binding('ctrl+r', 'resend_selected', 'Resend Selected'),
+    ]
+
+    def compose(self) -> ComposeResult:  # noqa: PLR6301
+        """Build this screen's widget tree.
+
+        Returns:
+            ComposeResult: The widgets that make up this screen.
+        """
+        yield Header()
+        with Horizontal(id='resend-input-row'):
+            yield TextArea(id='resend-textarea')
+            with Vertical(id='resend-actions'):
+                yield Button('Lookup', id='lookup-button')
+                yield Button(
+                    'Resend Selected',
+                    id='resend-button',
+                    variant='success',
+                )
+        yield SelectionList(id='resend-results')
+        yield Static(id='resend-status')
+        yield Footer()
+
+    def _status_widget(self) -> Static:
+        """Return the status line widget.
+
+        Returns:
+            Static: The status-line widget.
+        """
+        return self.query_one('#resend-status', Static)
+
+    def action_lookup(self) -> None:
+        """Resolve every pasted line against the ledger.
+
+        Returns:
+            None.
+        """
+        textarea = self.query_one('#resend-textarea', TextArea)
+        lines = list(
+            dict.fromkeys(
+                line.strip()
+                for line in textarea.text.splitlines()
+                if line.strip()
+            ),
+        )
+
+        theme = self.app.get_theme(self.app.theme)
+        results = self.query_one('#resend-results', SelectionList)
+        results.clear_options()
+
+        matched_lines = 0
+        not_found: List[str] = []
+        with HistoryTracker(self.app.history_db_path) as tracker:
+            for line in lines:
+                matches: List[SendHistory] = tracker.find_records(line)
+                if not matches:
+                    not_found.append(line)
+                    continue
+                matched_lines += 1
+                for row in matches:
+                    status = 'SENT' if row.sent else 'FAILED'
+                    style = HistoryScreen._history_status_style(
+                        status,
+                        theme,
+                    )
+                    label = Text.assemble(
+                        (row.file_name, ''),
+                        '  ',
+                        (status, style),
+                        f"  (matched '{line}')",
+                    )
+                    results.add_options([(label, row.path_hash, True)])
+
+        summary = (
+            f'{len(lines)} line(s) pasted, {matched_lines} matched, '
+            f'{len(not_found)} not found.'
+        )
+        if not_found:
+            summary += f' No match for: {", ".join(not_found)}'
+        self._status_widget().update(summary)
+
+    @on(Button.Pressed, '#lookup-button')
+    def handle_lookup_button(self) -> None:
+        """React to the Lookup button being clicked.
+
+        Returns:
+            None.
+        """
+        self.action_lookup()
+
+    def action_resend_selected(self) -> None:
+        """Reset every selected match to pending and force a cycle.
+
+        Returns:
+            None.
+        """
+        results = self.query_one('#resend-results', SelectionList)
+        selected: List[str] = list(results.selected)
+        if not selected:
+            self._status_widget().update('Nothing selected to resend.')
+            return
+
+        with HistoryTracker(self.app.history_db_path) as tracker:
+            for path_hash in selected:
+                tracker.reset_record(path_hash)
+        self.app.send_command({'cmd': 'force_run'})
+
+        self._status_widget().update(
+            f'Requeued {len(selected)} file(s) and triggered an '
+            f'immediate cycle — check Dashboard/History for results.',
+        )
+
+    @on(Button.Pressed, '#resend-button')
+    def handle_resend_button(self) -> None:
+        """React to the Resend Selected button being clicked.
+
+        Returns:
+            None.
+        """
+        self.action_resend_selected()
+
+
 class HelpScreen(Screen):
     """Static keybindings reference screen."""
 
@@ -692,6 +875,7 @@ class HelpScreen(Screen):
             '  F1        Dashboard',
             '  F2        History / ledger',
             '  F3        This help screen',
+            '  F4        Resend (paste a failure report and requeue)',
             '',
             'ACTIONS',
             '  R         Force a cycle run now',
@@ -704,6 +888,13 @@ class HelpScreen(Screen):
             '  1-4       Filter by status (all/sent/failed/pending),',
             '            or click the buttons above the table',
             '  Esc       Clear filters',
+            '',
+            'RESEND SCREEN',
+            '  Paste one identifier or filename per line, then:',
+            '  Ctrl+L    Look up every pasted line in the ledger',
+            '  Ctrl+R    Resend the checked matches (forces a cycle)',
+            '  A match already marked SENT is still reset and resent —',
+            '  use this when a downstream report says it never arrived.',
         ],
     )
 
@@ -731,6 +922,7 @@ class MonitorApp(App):
         Binding('f1', 'show_dashboard', 'Dashboard'),
         Binding('f2', 'show_history', 'History'),
         Binding('f3', 'show_help', 'Help'),
+        Binding('f4', 'show_resend', 'Resend'),
         Binding('q', 'detach', 'Detach'),
         Binding('ctrl+q', 'stop_and_quit', 'Stop & Quit'),
     ]
@@ -776,13 +968,14 @@ class MonitorApp(App):
         )
 
     def on_mount(self) -> None:
-        """Install the three screens and start listening to the daemon.
+        """Install the four screens and start listening to the daemon.
 
         Returns:
             None.
         """
         self.install_screen(DashboardScreen(), name='dashboard')
         self.install_screen(HistoryScreen(), name='history')
+        self.install_screen(ResendScreen(), name='resend')
         self.install_screen(HelpScreen(), name='help')
         self.push_screen('dashboard')
         if self.client is not None:
@@ -841,6 +1034,14 @@ class MonitorApp(App):
             None.
         """
         self.switch_screen('history')
+
+    def action_show_resend(self) -> None:
+        """Switch to the Resend screen.
+
+        Returns:
+            None.
+        """
+        self.switch_screen('resend')
 
     def action_show_help(self) -> None:
         """Switch to the Help screen.

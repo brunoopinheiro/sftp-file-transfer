@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from textual.widgets import Button
+from textual.widgets import Button, SelectionList, TextArea
 
 from sftp_file_transfer.components.history_tracker import HistoryTracker
 from sftp_file_transfer.monitor.app import (
@@ -10,6 +10,7 @@ from sftp_file_transfer.monitor.app import (
     HelpScreen,
     HistoryScreen,
     MonitorApp,
+    ResendScreen,
 )
 from sftp_file_transfer.monitor.state import DashboardState, LogEntry
 
@@ -719,3 +720,206 @@ def test_history_screen_search_filters_by_filename(tmp_path):
             assert table.row_count == 1
 
     _run(scenario())
+
+
+def test_f4_switches_to_resend_screen(tmp_path):
+    """Test pressing F4 switches to the Resend screen."""
+    app = MonitorApp(history_db_path=tmp_path / 'history.db')
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            assert isinstance(app.screen, ResendScreen)
+
+    _run(scenario())
+
+
+def test_resend_lookup_resolves_full_filename_and_bare_identifier(
+    tmp_path,
+):
+    """Test lookup resolves both a pasted full filename and a pasted
+    bare substring identifier to the same ledger record."""
+    db_path = tmp_path / 'history.db'
+    failed_file = tmp_path / 'invoice_002356.txt'
+    failed_file.touch()
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(failed_file, success=False, error='timeout')
+
+    app = MonitorApp(history_db_path=db_path)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'invoice_002356.txt\n002356'
+            await pilot.click('#lookup-button')
+            results = app.screen.query_one('#resend-results', SelectionList)
+            expected_option_count = 2
+            assert results.option_count == expected_option_count
+
+    _run(scenario())
+
+
+def test_resend_lookup_reports_lines_with_no_match(tmp_path):
+    """Test a pasted line with no ledger match is reported, not added
+    to the selection list."""
+    app = MonitorApp(history_db_path=tmp_path / 'history.db')
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'does-not-exist'
+            await pilot.click('#lookup-button')
+            results = app.screen.query_one('#resend-results', SelectionList)
+            assert results.option_count == 0
+            status = str(
+                app.screen.query_one('#resend-status').content,
+            )
+            assert 'does-not-exist' in status
+            assert '1 not found' in status
+
+    _run(scenario())
+
+
+def test_resend_lookup_lists_each_ambiguous_match_separately(tmp_path):
+    """Test one pasted line matching multiple records produces one
+    selectable row per match."""
+    db_path = tmp_path / 'history.db'
+    subdir = tmp_path / 'batch'
+    subdir.mkdir()
+    file_a = subdir / 'a.txt'
+    file_b = subdir / 'b.txt'
+    file_a.touch()
+    file_b.touch()
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(file_a, success=True)
+        tracker.record_attempt(file_b, success=False, error='boom')
+
+    app = MonitorApp(history_db_path=db_path)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'batch'
+            await pilot.click('#lookup-button')
+            results = app.screen.query_one('#resend-results', SelectionList)
+            expected_option_count = 2
+            assert results.option_count == expected_option_count
+
+    _run(scenario())
+
+
+def test_resend_selected_resets_sent_record_and_forces_a_cycle(tmp_path):
+    """Test resending an already-SENT match flips it back to pending
+    and sends exactly one force_run command."""
+    db_path = tmp_path / 'history.db'
+    sent_file = tmp_path / 'sent.txt'
+    sent_file.touch()
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(sent_file, success=True)
+
+    async def empty_stream():
+        return
+        yield  # pragma: no cover
+
+    mock_client = MagicMock()
+    mock_client.connect = AsyncMock()
+    mock_client.send_command = AsyncMock()
+    mock_client.state_stream = MagicMock(return_value=empty_stream())
+    app = MonitorApp(history_db_path=db_path, client=mock_client)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'sent.txt'
+            await pilot.click('#lookup-button')
+            await pilot.click('#resend-button')
+            await pilot.pause()
+
+    asyncio.run(scenario())
+
+    mock_client.send_command.assert_called_once_with({'cmd': 'force_run'})
+    with HistoryTracker(db_path) as tracker:
+        row = tracker.find_records('sent.txt')[0]
+        assert row.sent == 0
+
+
+def test_resend_selected_with_deselected_row_is_excluded(tmp_path):
+    """Test deselecting a matched row before resending excludes it from
+    the reset."""
+    db_path = tmp_path / 'history.db'
+    keep_sent_file = tmp_path / 'keep_sent.txt'
+    resend_file = tmp_path / 'resend_me.txt'
+    keep_sent_file.touch()
+    resend_file.touch()
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(keep_sent_file, success=True)
+        tracker.record_attempt(resend_file, success=True)
+
+    async def empty_stream():
+        return
+        yield  # pragma: no cover
+
+    mock_client = MagicMock()
+    mock_client.connect = AsyncMock()
+    mock_client.send_command = AsyncMock()
+    mock_client.state_stream = MagicMock(return_value=empty_stream())
+    app = MonitorApp(history_db_path=db_path, client=mock_client)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'keep_sent.txt\nresend_me.txt'
+            await pilot.click('#lookup-button')
+            results = app.screen.query_one(
+                '#resend-results',
+                SelectionList,
+            )
+            keep_hash = HistoryTracker.hash_path(keep_sent_file)
+            results.deselect(keep_hash)
+            await pilot.click('#resend-button')
+            await pilot.pause()
+
+    asyncio.run(scenario())
+
+    with HistoryTracker(db_path) as tracker:
+        kept = tracker.find_records('keep_sent.txt')[0]
+        resent = tracker.find_records('resend_me.txt')[0]
+    assert kept.sent == 1
+    assert resent.sent == 0
+
+
+def test_resend_selected_with_nothing_selected_is_a_noop(tmp_path):
+    """Test clicking Resend Selected with an empty selection list does
+    not send a command or touch the ledger."""
+    mock_client = MagicMock()
+    mock_client.connect = AsyncMock()
+    mock_client.send_command = AsyncMock()
+
+    async def empty_stream():
+        return
+        yield  # pragma: no cover
+
+    mock_client.state_stream = MagicMock(return_value=empty_stream())
+    app = MonitorApp(
+        history_db_path=tmp_path / 'history.db',
+        client=mock_client,
+    )
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            await pilot.click('#resend-button')
+            await pilot.pause()
+            status = str(
+                app.screen.query_one('#resend-status').content,
+            )
+            assert 'Nothing selected' in status
+
+    asyncio.run(scenario())
+
+    mock_client.send_command.assert_not_called()

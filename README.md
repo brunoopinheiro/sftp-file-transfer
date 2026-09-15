@@ -36,7 +36,7 @@ Both steps' outcomes (success, failure, per-file errors) are logged to a rotatin
 
 ### The `sftp_monitor` TUI
 
-`sftp_monitor` runs the same generate → send cycle as `sftp-file-transfer-scheduled`, but wrapped in a Textual dashboard with three screens: **Dashboard** (live status, connection state, sent/failed/pending counts, a 7-day usage chart, and a live log), **History** (a searchable/filterable view of the send-history ledger), and **Help** (keybindings).
+`sftp_monitor` runs the same generate → send cycle as `sftp-file-transfer-scheduled`, but wrapped in a Textual dashboard with four screens: **Dashboard** (live status, connection state, sent/failed/pending counts, a 7-day usage chart, and a live log), **History** (a searchable/filterable view of the send-history ledger), **Resend** (paste a failure report — one filename or embedded identifier per line — look it up against the ledger, review the matches, and force an immediate resend; a match already marked SENT is still reset and resent, for when a downstream report says it never actually arrived), and **Help** (keybindings).
 
 Unlike the plain scheduled loop, `sftp_monitor` is Docker-style detachable: the scheduler runs as a background daemon process, and the TUI is just a client attached to it — closing the TUI (`q`) leaves the daemon running.
 
@@ -51,7 +51,7 @@ poetry run sftp_monitor status       # check whether a daemon is running
 poetry run sftp_monitor stop         # stop the running daemon
 ```
 
-Keybindings inside the TUI: `F1`/`F2`/`F3` switch screens, `R` forces a cycle now, `P` pauses/resumes log-follow, `/` focuses the History search box, `1`-`4` filter History by status (or click the buttons above the table), `Esc` clears History filters, `Q` detaches (does **not** stop the daemon), and `Ctrl+Q` stops the daemon and quits.
+Keybindings inside the TUI: `F1`-`F4` switch screens, `R` forces a cycle now, `P` pauses/resumes log-follow, `/` focuses the History search box, `1`-`4` filter History by status (or click the buttons above the table), `Esc` clears History filters, `Ctrl+L`/`Ctrl+R` look up and resend on the Resend screen, `Q` detaches (does **not** stop the daemon), and `Ctrl+Q` stops the daemon and quits.
 
 Pass `--theme <name>` (on the default command or `attach`) to select a color theme — `nord` (default), `monokai`, `solarized-light`, or `high-contrast` — or switch it live from the in-app command palette (`Ctrl+P`). The chosen theme is persisted to `data/monitor_config.json`.
 
