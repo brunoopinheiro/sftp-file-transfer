@@ -41,6 +41,7 @@ Both steps' outcomes (success, failure, per-file errors) are logged to a rotatin
 Unlike the plain scheduled loop, `sftp_monitor` is Docker-style detachable: the scheduler runs as a background daemon process, and the TUI is just a client attached to it — closing the TUI (`q`) leaves the daemon running.
 
 - `SITE_NAME`: optional; the hotel site name shown in the Dashboard header. Defaults to blank if unset.
+- Also respects `POLL_INTERVAL_SECONDS` (same variable as `sftp-file-transfer-scheduled`, see above) for the daemon's cycle interval.
 
 ```bash
 poetry run sftp_monitor              # start (or attach to) the daemon + TUI

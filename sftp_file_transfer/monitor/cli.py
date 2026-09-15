@@ -421,6 +421,7 @@ def run_daemon_command() -> None:
             history_db_path=DEFAULT_HISTORY_DB_PATH,
             lock_path=DEFAULT_LOCK_PATH,
             site_name=os.getenv('SITE_NAME', ''),
+            poll_interval_sec=int(os.getenv('POLL_INTERVAL_SECONDS', '30')),
         )
         server = await daemon.start_server()
         port = server.sockets[0].getsockname()[1]

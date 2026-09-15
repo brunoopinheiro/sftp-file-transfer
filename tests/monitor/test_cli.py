@@ -442,6 +442,86 @@ def test_main_callback_errors_when_daemon_never_starts():
     assert 'Failed to start' in result.stdout
 
 
+def test_run_daemon_command_passes_poll_interval_from_env(
+    tmp_path,
+    monkeypatch,
+):
+    """Test `_run_daemon` reads POLL_INTERVAL_SECONDS and forwards it to
+    MonitorDaemon, matching the plain scheduled.py entrypoint's env var."""
+    lock_path = tmp_path / 'monitor.lock'
+    db_path = tmp_path / 'history.db'
+    configured_poll_interval_sec = 5
+    monkeypatch.setenv(
+        'POLL_INTERVAL_SECONDS',
+        str(configured_poll_interval_sec),
+    )
+    captured_kwargs = {}
+
+    class ImmediatelyStoppingDaemon(MonitorDaemon):
+        def __init__(self, *args, **kwargs):
+            captured_kwargs.update(kwargs)
+            super().__init__(*args, **kwargs)
+
+        async def run_forever(self):
+            await self.stop()
+
+    with (
+        patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
+        patch(
+            'sftp_file_transfer.monitor.cli.DEFAULT_HISTORY_DB_PATH',
+            db_path,
+        ),
+        patch(
+            'sftp_file_transfer.monitor.cli.MonitorDaemon',
+            ImmediatelyStoppingDaemon,
+        ),
+    ):
+        result = runner.invoke(cli.app, ['_run_daemon'])
+
+    assert result.exit_code == 0
+    assert captured_kwargs['poll_interval_sec'] == configured_poll_interval_sec
+
+
+def test_run_daemon_command_defaults_poll_interval_to_30(
+    tmp_path,
+    monkeypatch,
+):
+    """Test `_run_daemon` defaults to a 30s cycle when the env var is
+    unset, matching scheduled.py's own default."""
+    lock_path = tmp_path / 'monitor.lock'
+    db_path = tmp_path / 'history.db'
+    monkeypatch.delenv('POLL_INTERVAL_SECONDS', raising=False)
+    default_poll_interval_sec = 30
+    captured_kwargs = {}
+
+    class ImmediatelyStoppingDaemon(MonitorDaemon):
+        def __init__(self, *args, **kwargs):
+            captured_kwargs.update(kwargs)
+            super().__init__(*args, **kwargs)
+
+        async def run_forever(self):
+            await self.stop()
+
+    with (
+        patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
+        patch(
+            'sftp_file_transfer.monitor.cli.DEFAULT_HISTORY_DB_PATH',
+            db_path,
+        ),
+        patch(
+            'sftp_file_transfer.monitor.cli.MonitorDaemon',
+            ImmediatelyStoppingDaemon,
+        ),
+        # Isolate from the developer's real .env — EnvLoader() would
+        # otherwise repopulate the just-deleted env var from disk.
+        patch('sftp_file_transfer.monitor.cli.EnvLoader'),
+    ):
+        result = runner.invoke(cli.app, ['_run_daemon'])
+
+    assert result.exit_code == 0
+    assert captured_kwargs['poll_interval_sec'] == default_poll_interval_sec
+
+
 def test_run_daemon_command_starts_server_and_writes_lock(tmp_path):
     """Test the hidden `_run_daemon` command starts the server, writes
     the lock file, and stops cleanly when the daemon is told to stop."""
