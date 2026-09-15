@@ -1,6 +1,9 @@
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from paramiko import SSHException
 
 from sftp_file_transfer.components.sftp_manager import SFTPManager
@@ -63,7 +66,8 @@ def test_upload_file_retries_on_transient_exception(sftp_fixture, tmp_path):
 
 
 def test_upload_file_does_not_retry_on_missing_local_file(
-    sftp_fixture, tmp_path,
+    sftp_fixture,
+    tmp_path,
 ):
     """Test that upload_file does not retry when the local file is missing."""
     missing_file = tmp_path / 'missing.txt'
@@ -149,3 +153,265 @@ def test_sftp_fetch(sftp_fixture, tmp_path):
                 local_file.read_text()
                 == 'This is a test file for pytest-sftpserver.'
             )  # noqa
+
+
+def test_download_file_calls_sftp_get(sftp_fixture, tmp_path):
+    """Test that download_file calls sftp.get with correct arguments."""
+    host = sftp_fixture.host
+    port = sftp_fixture.port
+    remote_path = '/remote/file.txt'
+    local_path = tmp_path / 'downloaded.txt'
+
+    with SFTPManager({
+        'sftp_host': host,
+        'sftp_port': port,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }) as sftp_manager:
+        with patch.object(sftp_manager._sftp, 'get') as mock_get:
+            sftp_manager.download_file(
+                remote_path=remote_path,
+                local_path=local_path,
+            )
+            mock_get.assert_called_once_with(remote_path, local_path)
+
+
+def test_make_directory_calls_sftp_mkdir(sftp_fixture):
+    """Test that make_directory calls sftp.mkdir with correct arguments."""
+    host = sftp_fixture.host
+    port = sftp_fixture.port
+    remote_path = '/new_directory'
+
+    with SFTPManager({
+        'sftp_host': host,
+        'sftp_port': port,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }) as sftp_manager:
+        with patch.object(sftp_manager._sftp, 'mkdir') as mock_mkdir:
+            sftp_manager.make_directory(remote_path)
+            mock_mkdir.assert_called_once_with(remote_path)
+
+
+def test_remove_directory_calls_sftp_rmdir(sftp_fixture):
+    """Test that remove_directory calls sftp.rmdir with correct arguments."""
+    host = sftp_fixture.host
+    port = sftp_fixture.port
+    remote_path = '/directory_to_remove'
+
+    with SFTPManager({
+        'sftp_host': host,
+        'sftp_port': port,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }) as sftp_manager:
+        with patch.object(sftp_manager._sftp, 'rmdir') as mock_rmdir:
+            sftp_manager.remove_directory(remote_path)
+            mock_rmdir.assert_called_once_with(remote_path)
+
+
+def test_list_files_calls_sftp_listdir(sftp_fixture):
+    """Test that list_files calls sftp.listdir and wraps results in Path."""
+    host = sftp_fixture.host
+    port = sftp_fixture.port
+    remote_path = '/some_dir'
+
+    with SFTPManager({
+        'sftp_host': host,
+        'sftp_port': port,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }) as sftp_manager:
+        with patch.object(
+            sftp_manager._sftp,
+            'listdir',
+            return_value=['a.txt', 'b.txt'],
+        ) as mock_listdir:
+            result = sftp_manager.list_files(remote_path)
+
+            mock_listdir.assert_called_once_with(remote_path)
+            assert result == [Path('a.txt'), Path('b.txt')]
+
+
+def test_download_file_raises_when_not_connected(tmp_path):
+    """Test download_file raises RuntimeError when SFTP not connected."""
+    config = {
+        'sftp_host': 'localhost',
+        'sftp_port': 22,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+    sftp_manager = SFTPManager(config)
+    # Don't enter context, so _sftp remains None
+
+    with pytest.raises(RuntimeError, match='SFTP client is not connected'):
+        sftp_manager.download_file(
+            remote_path='/some/file.txt',
+            local_path=tmp_path / 'file.txt',
+        )
+
+
+def test_upload_file_raises_when_not_connected_but_local_file_exists(
+    tmp_path,
+):
+    """Test upload_file raises RuntimeError when not connected, file exists."""
+    local_file = tmp_path / 'existing_file.txt'
+    local_file.write_text('content')
+
+    config = {
+        'sftp_host': 'localhost',
+        'sftp_port': 22,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+    sftp_manager = SFTPManager(config)
+    # Don't enter context, so _sftp remains None
+
+    with pytest.raises(RuntimeError, match='SFTP client is not connected'):
+        sftp_manager.upload_file(
+            local_path=local_file,
+            remote_path='/remote/file.txt',
+        )
+
+
+def test_list_files_raises_when_not_connected():
+    """Test that list_files raises RuntimeError when SFTP is not connected."""
+    config = {
+        'sftp_host': 'localhost',
+        'sftp_port': 22,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+    sftp_manager = SFTPManager(config)
+
+    with pytest.raises(RuntimeError, match='SFTP client is not connected'):
+        sftp_manager.list_files('/remote/directory')
+
+
+def test_make_directory_raises_when_not_connected():
+    """Test make_directory raises RuntimeError when SFTP not connected."""
+    config = {
+        'sftp_host': 'localhost',
+        'sftp_port': 22,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+    sftp_manager = SFTPManager(config)
+
+    with pytest.raises(RuntimeError, match='SFTP client is not connected'):
+        sftp_manager.make_directory('/remote/directory')
+
+
+def test_remove_directory_raises_when_not_connected():
+    """Test remove_directory raises RuntimeError when SFTP not connected."""
+    config = {
+        'sftp_host': 'localhost',
+        'sftp_port': 22,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+    sftp_manager = SFTPManager(config)
+
+    with pytest.raises(RuntimeError, match='SFTP client is not connected'):
+        sftp_manager.remove_directory('/remote/directory')
+
+
+def test_connect_uses_key_based_auth_when_key_filepath_set(tmp_path):
+    """Test that _connect uses key-based auth when key_filepath is provided."""
+    key_filepath = tmp_path / 'fake_key'
+    key_password = 'key_pass'
+
+    config = {
+        'sftp_host': 'localhost',
+        'sftp_port': 22,
+        'sftp_user': 'testuser',
+        'sftp_password': 'pw',
+        'key_filepath': key_filepath,
+        'key_password': key_password,
+    }
+
+    mock_key = MagicMock()
+    mock_transport = MagicMock()
+    mock_sftp = MagicMock()
+
+    with (
+        patch(
+            'sftp_file_transfer.components.sftp_manager.RSAKey.from_private_key_file',
+            return_value=mock_key,
+        ) as mock_from_key,
+        patch(
+            'sftp_file_transfer.components.sftp_manager.Transport',
+            return_value=mock_transport,
+        ) as mock_transport_class,
+        patch(
+            'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
+            return_value=mock_sftp,
+        ) as mock_from_transport,
+    ):
+        sftp_manager = SFTPManager(config)
+        sftp_manager._connect()
+
+        mock_from_key.assert_called_once_with(
+            key_filepath, password=key_password
+        )
+        mock_transport_class.assert_called_once_with(('localhost', 22))
+        mock_transport.connect.assert_called_once_with(
+            username='testuser',
+            pkey=mock_key,
+        )
+        mock_from_transport.assert_called_once_with(mock_transport)
+        assert sftp_manager._sftp == mock_sftp
+        assert sftp_manager._transport == mock_transport
+
+
+@given(
+    sftp_host=st.one_of(st.text(), st.integers(), st.none(), st.booleans()),
+    sftp_port=st.one_of(st.integers(), st.text(), st.none()),
+    sftp_user=st.one_of(st.text(), st.integers(), st.none(), st.booleans()),
+    sftp_password=st.one_of(
+        st.text(), st.integers(), st.none(), st.booleans()
+    ),
+)
+def test_check_args_matches_isinstance_invariant(
+    sftp_host,
+    sftp_port,
+    sftp_user,
+    sftp_password,
+):
+    """Test that check_args validates types correctly using isinstance."""
+    should_be_valid = (
+        isinstance(sftp_host, str)
+        and isinstance(sftp_port, int)
+        and isinstance(sftp_user, str)
+        and isinstance(sftp_password, str)
+    )
+
+    if should_be_valid:
+        # Should not raise
+        SFTPManager.check_args(sftp_host, sftp_port, sftp_user, sftp_password)
+    else:
+        # Should raise ValueError
+        with pytest.raises(
+            ValueError, match='All SFTP connection parameters must be provided'
+        ):
+            SFTPManager.check_args(
+                sftp_host, sftp_port, sftp_user, sftp_password
+            )

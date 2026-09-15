@@ -10,7 +10,21 @@ logger: Logger = setup_logger()
 
 
 class FileManager:
-    def __init__(self):
+    """A collection of static file and directory utility methods.
+
+    Provides functionality for fetching, filtering, sorting, and copying files
+    and directories built on pathlib, with logging via the module logger.
+    """
+
+    def __init__(self) -> None:
+        """Initialize FileManager instance.
+
+        Sets self.root_dir to the user's home directory via
+        _find_root_directory().
+
+        Returns:
+            None.
+        """
         self.root_dir = self._find_root_directory()
 
     @staticmethod
@@ -33,6 +47,9 @@ class FileManager:
 
         Returns:
             List[Path]: A list of file paths.
+
+        Raises:
+            FileNotFoundError: If the directory does not exist.
         """
         if isinstance(directory, str):
             directory = Path(directory)
@@ -52,6 +69,9 @@ class FileManager:
 
         Returns:
             List[Path]: A list of directory paths.
+
+        Raises:
+            FileNotFoundError: If the directory does not exist.
         """
         if isinstance(directory, str):
             directory = Path(directory)
@@ -74,6 +94,9 @@ class FileManager:
 
         Returns:
             List[Path]: A list of file paths with the specified extension.
+
+        Raises:
+            FileNotFoundError: If the directory does not exist.
         """
         if isinstance(directory, str):
             directory = Path(directory)

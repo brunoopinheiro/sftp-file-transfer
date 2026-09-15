@@ -12,21 +12,26 @@ logger: Logger = setup_logger()
 
 
 def require_env_vars(func: Callable) -> Callable:
-    """Decorator to ensure required environment variables are set.
+    """Decorator to ensure required SFTP environment variables are set.
+
+    This decorator wraps a function to verify that required SFTP configuration
+    variables (SFTP_HOST, SFTP_PORT, SFTP_USER, SFTP_PASSWORD) are present
+    and valid before the decorated function is executed.
 
     Args:
-        func (callable): The function to decorate.
+        func (Callable): The function to decorate. Must accept arbitrary
+            args and kwargs.
 
     Raises:
         ValueError: If a required environment variable is missing.
         ValueError: If a required environment variable is not a string.
 
     Returns:
-        Callable: The wrapped function.
+        Callable: The wrapped function with environment variable validation.
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         required_vars = {
             'SFTP_HOST',
             'SFTP_PORT',
@@ -65,6 +70,15 @@ class EnvLoader:
     """
 
     def __init__(self) -> None:
+        """Initialize EnvLoader by loading environment variables from .env.
+
+        Loads environment variables from a .env file using python-dotenv.
+        Logs the result of the operation: either successful load or warning
+        if no .env file was found.
+
+        Returns:
+            None
+        """
         logger.info('Loading environment variables from .env file.')
         res = load_dotenv(find_dotenv())
         if res is True:
@@ -74,6 +88,20 @@ class EnvLoader:
 
     @require_env_vars
     def __getattribute__(self, name: str) -> Any:
+        """Get an environment variable or object attribute.
+
+        Intercepts attribute access to return SFTP configuration variables
+        from environment. For SFTP_HOST, SFTP_PORT, SFTP_USER, and
+        SFTP_PASSWORD, returns the corresponding environment variable value.
+        For other attributes, delegates to the parent class.
+
+        Args:
+            name (str): The name of the attribute being accessed.
+
+        Returns:
+            Any: The environment variable value for SFTP variables, or the
+                attribute from the parent class for other names.
+        """
         if name in {'SFTP_HOST', 'SFTP_PORT', 'SFTP_USER', 'SFTP_PASSWORD'}:
             logger.info(f'Accessing environment variable: {name}')
             return os.getenv(name)
