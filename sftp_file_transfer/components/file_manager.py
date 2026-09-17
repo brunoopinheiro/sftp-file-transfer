@@ -56,7 +56,7 @@ class FileManager:
 
         dir_path = directory.absolute()
         files = [f for f in dir_path.iterdir() if f.is_file()]
-        logger.info(f'Fetched files from {dir_path}: {files}')
+        logger.info(f'Fetched {len(files)} file(s) from {dir_path}')
         return files
 
     @staticmethod
@@ -78,7 +78,7 @@ class FileManager:
 
         dir_path = directory.absolute()
         dirs = [d for d in dir_path.iterdir() if d.is_dir()]
-        logger.info(f'Fetched directories from {dir_path}: {dirs}')
+        logger.info(f'Fetched {len(dirs)} director(y/ies) from {dir_path}')
         return dirs
 
     @staticmethod
@@ -107,7 +107,9 @@ class FileManager:
             for f in dir_path.iterdir()
             if f.is_file() and f.suffix == extension
         ]
-        logger.info(f'Fetched {extension} files from {dir_path}: {files}')
+        logger.info(
+            f'Fetched {len(files)} {extension} file(s) from {dir_path}',
+        )
         return files
 
     @staticmethod
@@ -127,7 +129,7 @@ class FileManager:
         sorted_files = sorted(
             files, key=lambda x: x.stat().st_mtime, reverse=reverse
         )
-        logger.info(f'Sorted files by date: {sorted_files}')
+        logger.info(f'Sorted {len(sorted_files)} file(s) by date')
         return sorted_files
 
     @staticmethod
@@ -149,7 +151,9 @@ class FileManager:
             for f in files
             if datetime.fromtimestamp(f.stat().st_mtime).date() == date.date()
         ]
-        logger.info(f'Filtered files by date {date}: {filtered_files}')
+        logger.info(
+            f'Filtered {len(filtered_files)} file(s) by date {date}',
+        )
         return filtered_files
 
     @staticmethod
@@ -174,7 +178,8 @@ class FileManager:
             if start <= datetime.fromtimestamp(f.stat().st_mtime).date() <= end
         ]
         logger.info(
-            f'Filtered files by date range {start}..{end}: {filtered_files}',
+            f'Filtered {len(filtered_files)} file(s) by date range '
+            f'{start}..{end}',
         )
         return filtered_files
 

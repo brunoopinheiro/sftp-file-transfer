@@ -42,6 +42,30 @@ def test_fetch_files(tmp_path):
     assert all(f.name in {'file1.txt', 'file2.txt'} for f in files)
 
 
+def test_fetch_files_logs_a_count_not_the_full_file_list(tmp_path, caplog):
+    """Test fetch_files() logs a count, not every fetched file path.
+
+    A directory with many files previously produced one giant log line
+    (one Path repr per file). Once that logger's output started being
+    mirrored into the monitor daemon's dashboard broadcast, a large
+    enough directory would produce a single JSON line long enough to
+    overflow the TUI client's asyncio.StreamReader.readline() limit,
+    crashing the attached UI (LimitOverrunError/ValueError).
+    """
+    test_dir = tmp_path / 'test_dir'
+    test_dir.mkdir()
+    file_count = 50
+    for i in range(file_count):
+        (test_dir / f'file{i}.txt').touch()
+
+    with caplog.at_level('INFO', logger='sftp_file_transfer'):
+        FileManager.fetch_files(test_dir)
+
+    messages = [r.message for r in caplog.records]
+    assert any(str(file_count) in m for m in messages)
+    assert not any('file0.txt' in m for m in messages)
+
+
 def test_fetch_directories(tmp_path):
     """Test fetching directories from a directory."""
     file_manager = FileManager()
