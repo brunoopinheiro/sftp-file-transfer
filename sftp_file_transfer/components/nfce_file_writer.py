@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Union
 
 
 @dataclass
@@ -14,11 +15,16 @@ class NfceOutputPaths:
     no_protocol: Path
 
 
-def build_output_paths(output_dir: Path, chave: str) -> NfceOutputPaths:
+def build_output_paths(
+    output_dir: Union[str, Path],
+    chave: str,
+) -> NfceOutputPaths:
     """Build output paths for NFe files.
 
     Args:
-        output_dir (Path): The output directory.
+        output_dir (Union[str, Path]): The output directory. Accepts a
+            plain string since it commonly comes straight from an
+            environment variable (e.g. NFCE_OUTPUT_PATH).
         chave (str): The NFe chave (key).
 
     Returns:
@@ -35,6 +41,7 @@ def build_output_paths(output_dir: Path, chave: str) -> NfceOutputPaths:
         >>> paths.no_protocol.name
         'NFe12345_semprotocolo.xml'
     """
+    output_dir = Path(output_dir)
     return NfceOutputPaths(
         authorized=output_dir / f'NFe{chave}.xml',
         cancellation=output_dir / f'NFe{chave}_cancelamento.xml',

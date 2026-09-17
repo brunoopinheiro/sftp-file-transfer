@@ -23,6 +23,20 @@ def test_build_output_paths_returns_expected_filenames(tmp_path):
     assert result.no_protocol == tmp_path / f'NFe{chave}_semprotocolo.xml'
 
 
+def test_build_output_paths_accepts_a_plain_string_output_dir(tmp_path):
+    """Test build_output_paths works when output_dir is a str, not a Path.
+
+    NFCE_OUTPUT_PATH always arrives as a plain string straight from the
+    environment (NfceConfig never wraps it in Path), so this must not
+    raise "unsupported operand type(s) for /: 'str' and 'str'".
+    """
+    chave = 'ABC123XYZ789'
+
+    result = build_output_paths(str(tmp_path), chave)
+
+    assert result.authorized == tmp_path / f'NFe{chave}.xml'
+
+
 def test_already_exists_returns_false_when_no_files_exist(tmp_path):
     """Test that already_exists returns False when no files exist."""
     chave = 'TEST123'
