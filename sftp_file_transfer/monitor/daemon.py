@@ -3,7 +3,7 @@ import ctypes
 import json
 import os
 from datetime import date, datetime, timedelta
-from logging import Logger
+from logging import Handler, Logger, LogRecord
 from pathlib import Path
 from typing import List, Optional, Set, Union
 
@@ -51,6 +51,39 @@ def _is_pid_alive(pid: int) -> bool:
     return False
 
 
+class _DashboardLogHandler(Handler):
+    """Mirrors every record on the shared logger into the dashboard.
+
+    This keeps the TUI's LIVE LOG panel showing exactly the same lines
+    as `logs/sftp_file_transfer.log`, rather than a separate hand-written
+    narration stream.
+    """
+
+    def __init__(self, daemon: 'MonitorDaemon') -> None:
+        """Store the daemon whose dashboard state should receive records.
+
+        Args:
+            daemon: The daemon instance to forward log records to.
+
+        Returns:
+            None.
+        """
+        super().__init__()
+        self._daemon = daemon
+
+    def emit(self, record: LogRecord) -> None:
+        """Forward one log record to the daemon's dashboard ring buffer.
+
+        Args:
+            record: The log record emitted by the shared logger.
+
+        Returns:
+            None.
+        """
+        ts = datetime.fromtimestamp(record.created).strftime('%H:%M:%S')
+        self._daemon._log(ts, record.levelname, record.getMessage())
+
+
 class MonitorDaemon:
     """Owns the scheduled send/generate loop and broadcasts live state.
 
@@ -89,6 +122,10 @@ class MonitorDaemon:
         self._started_at = datetime.now()
         self._clients: Set[asyncio.StreamWriter] = set()
         self._server: Optional[asyncio.base_events.Server] = None
+        for handler in list(logger.handlers):
+            if isinstance(handler, _DashboardLogHandler):
+                logger.removeHandler(handler)
+        logger.addHandler(_DashboardLogHandler(self))
 
     def run_cycle(self) -> None:
         """Run one generate/send cycle and refresh dashboard state.
@@ -104,7 +141,7 @@ class MonitorDaemon:
         """
         self.state.cycle_num += 1
         now = datetime.now().strftime('%H:%M:%S')
-        self._log(now, 'INFO', f'Cycle #{self.state.cycle_num} started')
+        logger.info(f'Cycle #{self.state.cycle_num} started')
 
         self._check_connections()
 
@@ -126,10 +163,7 @@ class MonitorDaemon:
         self.state.last_cycle_time = now
         self.state.countdown_sec = self.poll_interval_sec
 
-        completed_at = datetime.now().strftime('%H:%M:%S')
-        self._log(
-            completed_at,
-            'INFO',
+        logger.info(
             f'Cycle #{self.state.cycle_num} completed: '
             f'{self.state.sent_count} sent, '
             f'{self.state.failed_count} failed',

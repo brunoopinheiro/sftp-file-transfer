@@ -8,6 +8,7 @@ from sftp_file_transfer.components.history_tracker import HistoryTracker
 from sftp_file_transfer.monitor.daemon import (
     MonitorDaemon,
     _is_pid_alive,  # noqa: PLC2701
+    logger,
 )
 
 DEFAULT_TEST_POLL_INTERVAL_SEC = 45
@@ -69,6 +70,46 @@ def test_run_cycle_appends_start_and_completed_log_lines(tmp_path):
     messages = [entry.msg for entry in daemon.state.log_lines]
     assert any('started' in m for m in messages)
     assert any('completed' in m for m in messages)
+
+
+def test_logger_calls_are_mirrored_into_the_dashboard_log_lines(tmp_path):
+    """Test that any logger.* call reaches the dashboard's LIVE LOG panel.
+
+    This is what makes the panel show the same lines as
+    `logs/sftp_file_transfer.log`, instead of just the two hand-written
+    cycle start/completed narration lines.
+    """
+    daemon = _make_daemon(tmp_path)
+
+    logger.error('SFTP connectivity probe failed: boom')
+
+    messages = [entry.msg for entry in daemon.state.log_lines]
+    levels = [entry.level for entry in daemon.state.log_lines]
+    assert 'SFTP connectivity probe failed: boom' in messages
+    assert 'ERROR' in levels
+
+
+def test_creating_a_new_daemon_replaces_the_previous_dashboard_handler(
+    tmp_path,
+):
+    """Test only the most recently created daemon receives log records.
+
+    Guards against unboundedly stacking handlers on the shared logger
+    (e.g. one per test/daemon instance created in a process).
+    """
+    first_daemon = _make_daemon(tmp_path)
+    second_daemon = _make_daemon(tmp_path)
+
+    logger.info('only for the current daemon')
+
+    assert not any(
+        'only for the current daemon' in entry.msg
+        for entry in first_daemon.state.log_lines
+    )
+    assert any(
+        'only for the current daemon' in entry.msg
+        for entry in second_daemon.state.log_lines
+    )
 
 
 def test_run_cycle_status_is_success_when_healthy_and_no_new_failures(
