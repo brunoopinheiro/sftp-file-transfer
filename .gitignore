@@ -29,8 +29,9 @@ MANIFEST
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
+#  These spec files are hand-customized (hiddenimports for rich._unicode_data)
+#  and are the build source of truth, so they are tracked instead of ignored.
 *.manifest
-*.spec
 
 # Installer logs
 pip-log.txt

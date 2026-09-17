@@ -108,7 +108,7 @@ format = "ruff check . --fix && ruff format ."
 pre_test = "task format"
 test = "pytest -vv --cov=sftp_file_transfer --cov-report=term-missing -p no:warnings"
 post_test = "coverage html"
-build = 'pyinstaller --onefile --name sftp-file-transfer --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/main.py'
-build_scheduled = 'pyinstaller --onefile --name sftp-file-transfer-scheduled --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/scheduled.py'
-build_history = 'pyinstaller --onefile --name sftp-file-transfer-history --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/history_cli.py'
-build_monitor = 'pyinstaller --onefile --name sftp-file-transfer-monitor --add-data "sftp_file_transfer;./sftp_file_transfer" sftp_file_transfer/monitor/cli.py'
+build = 'pyinstaller sftp-file-transfer.spec'
+build_scheduled = 'pyinstaller sftp-file-transfer-scheduled.spec'
+build_history = 'pyinstaller sftp-file-transfer-history.spec'
+build_monitor = 'pyinstaller sftp-file-transfer-monitor.spec'
