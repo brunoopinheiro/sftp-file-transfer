@@ -563,8 +563,8 @@ def test_run_daemon_command_passes_poll_interval_from_env(
     with (
         patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
         patch(
-            'sftp_file_transfer.monitor.cli.DEFAULT_HISTORY_DB_PATH',
-            db_path,
+            'sftp_file_transfer.monitor.cli.resolve_history_db_path',
+            return_value=db_path,
         ),
         patch(
             'sftp_file_transfer.monitor.cli.MonitorDaemon',
@@ -600,8 +600,8 @@ def test_run_daemon_command_defaults_poll_interval_to_30(
     with (
         patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
         patch(
-            'sftp_file_transfer.monitor.cli.DEFAULT_HISTORY_DB_PATH',
-            db_path,
+            'sftp_file_transfer.monitor.cli.resolve_history_db_path',
+            return_value=db_path,
         ),
         patch(
             'sftp_file_transfer.monitor.cli.MonitorDaemon',
@@ -630,8 +630,8 @@ def test_run_daemon_command_starts_server_and_writes_lock(tmp_path):
     with (
         patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
         patch(
-            'sftp_file_transfer.monitor.cli.DEFAULT_HISTORY_DB_PATH',
-            db_path,
+            'sftp_file_transfer.monitor.cli.resolve_history_db_path',
+            return_value=db_path,
         ),
         patch(
             'sftp_file_transfer.monitor.cli.MonitorDaemon',
@@ -665,8 +665,8 @@ def test_run_daemon_command_keeps_lock_file_until_run_forever_returns(
     with (
         patch('sftp_file_transfer.monitor.cli.DEFAULT_LOCK_PATH', lock_path),
         patch(
-            'sftp_file_transfer.monitor.cli.DEFAULT_HISTORY_DB_PATH',
-            db_path,
+            'sftp_file_transfer.monitor.cli.resolve_history_db_path',
+            return_value=db_path,
         ),
         patch(
             'sftp_file_transfer.monitor.cli.MonitorDaemon',

@@ -26,12 +26,12 @@ from sftp_file_transfer.components.file_manager import FileManager
 from sftp_file_transfer.components.history_tracker import (
     HistoryTracker,
     SendHistory,
+    resolve_history_db_path,
 )
 from sftp_file_transfer.monitor.client import DaemonClient
 from sftp_file_transfer.monitor.config import DEFAULT_THEME, MonitorConfig
 from sftp_file_transfer.monitor.state import DashboardState
 
-DEFAULT_HISTORY_DB_PATH = Path('data') / 'send_history.db'
 MAX_VISIBLE_LOG_LINES = 40
 
 HIGH_CONTRAST_THEME = Theme(
@@ -964,7 +964,7 @@ class MonitorApp(App):
 
     def __init__(
         self,
-        history_db_path: Union[str, Path] = DEFAULT_HISTORY_DB_PATH,
+        history_db_path: Optional[Union[str, Path]] = None,
         client: Optional[DaemonClient] = None,
         initial_state: Optional[DashboardState] = None,
         theme_name: Optional[str] = None,
@@ -973,7 +973,10 @@ class MonitorApp(App):
 
         Args:
             history_db_path: Path to the send-history ledger database,
-                used directly by the History screen.
+                used directly by the History screen, or None to resolve
+                HISTORY_DB_PATH from the .env file (see
+                resolve_history_db_path()) — the same value every other
+                entry point (scheduled.py, MonitorDaemon) uses.
             client: Connected DaemonClient to stream live state from,
                 or None to run without a live daemon connection.
             initial_state: DashboardState to render before any update
@@ -985,7 +988,11 @@ class MonitorApp(App):
             None.
         """
         super().__init__()
-        self.history_db_path = Path(history_db_path)
+        self.history_db_path = (
+            Path(history_db_path)
+            if history_db_path is not None
+            else resolve_history_db_path()
+        )
         self.client = client
         self.dashboard_state = initial_state or DashboardState()
         self.follow_log = True

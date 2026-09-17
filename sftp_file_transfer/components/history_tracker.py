@@ -1,10 +1,12 @@
 import hashlib
+import os
 from datetime import date, datetime
 from logging import Logger
 from pathlib import Path
 from types import TracebackType
 from typing import List, Optional, Set, Type, Union
 
+from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import Index, create_engine, func, select, update
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -20,6 +22,23 @@ logger: Logger = setup_logger()
 
 DEFAULT_DB_PATH = Path('data') / 'send_history.db'
 _SHA256_HEX_LENGTH = 64
+
+
+def resolve_history_db_path() -> Path:
+    """Resolve the send-history ledger path from the project .env file.
+
+    Every entry point (scheduled daemon, monitor TUI/daemon, history
+    CLI) should call this instead of reading HISTORY_DB_PATH directly,
+    so they all agree on the same ledger file regardless of each
+    process's own working directory or whether it already loaded the
+    .env file itself.
+
+    Returns:
+        Path: HISTORY_DB_PATH from the environment/.env file, or
+            DEFAULT_DB_PATH if it isn't set.
+    """
+    load_dotenv(find_dotenv())
+    return Path(os.getenv('HISTORY_DB_PATH', DEFAULT_DB_PATH))
 
 
 class Base(DeclarativeBase):

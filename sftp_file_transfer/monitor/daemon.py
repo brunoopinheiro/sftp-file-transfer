@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import List, Optional, Set, Union
 
 from sftp_file_transfer.components.env_loader import EnvLoader
-from sftp_file_transfer.components.history_tracker import HistoryTracker
+from sftp_file_transfer.components.history_tracker import (
+    HistoryTracker,
+    resolve_history_db_path,
+)
 from sftp_file_transfer.components.logger_setup import setup_logger
 from sftp_file_transfer.components.nfce_config import NfceConfig
 from sftp_file_transfer.components.nfce_db_client import build_engine
@@ -22,7 +25,6 @@ from sftp_file_transfer.scheduled import scheduled_task
 logger: Logger = setup_logger()
 
 DEFAULT_LOCK_PATH = Path('data') / 'monitor.lock'
-DEFAULT_HISTORY_DB_PATH = Path('data') / 'send_history.db'
 MAX_LOG_LINES = 200
 DAILY_COUNTS_WINDOW_DAYS = 7
 
@@ -95,7 +97,7 @@ class MonitorDaemon:
 
     def __init__(
         self,
-        history_db_path: Union[str, Path] = DEFAULT_HISTORY_DB_PATH,
+        history_db_path: Optional[Union[str, Path]] = None,
         lock_path: Union[str, Path] = DEFAULT_LOCK_PATH,
         poll_interval_sec: int = 30,
         site_name: str = '',
@@ -103,7 +105,10 @@ class MonitorDaemon:
         """Initialize the daemon's state and configuration.
 
         Args:
-            history_db_path: Path to the send-history ledger database.
+            history_db_path: Path to the send-history ledger database,
+                or None to resolve HISTORY_DB_PATH from the .env file
+                (see resolve_history_db_path()) — the same value every
+                other entry point (scheduled.py, history_cli.py) uses.
             lock_path: Path to the lock file recording pid/port.
             poll_interval_sec: Seconds between scheduled cycles.
             site_name: Display name of the hotel site being monitored.
@@ -111,7 +116,11 @@ class MonitorDaemon:
         Returns:
             None.
         """
-        self.history_db_path = Path(history_db_path)
+        self.history_db_path = (
+            Path(history_db_path)
+            if history_db_path is not None
+            else resolve_history_db_path()
+        )
         self.lock_path = Path(lock_path)
         self.poll_interval_sec = poll_interval_sec
         self.state = DashboardState(

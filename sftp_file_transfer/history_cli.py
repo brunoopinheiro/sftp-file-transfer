@@ -1,4 +1,3 @@
-import os
 from datetime import date
 from typing import List, Optional
 
@@ -11,6 +10,7 @@ from typer import Argument, Context, Option, Typer
 from sftp_file_transfer.components.history_tracker import (
     HistoryTracker,
     SendHistory,
+    resolve_history_db_path,
 )
 
 app = Typer()
@@ -22,15 +22,17 @@ _DB_HELP = (
 
 
 def _resolve_db_path(db: Optional[str]) -> str:
-    """Resolve the database path, falling back to env var or default.
+    """Resolve the database path, falling back to the .env file/default.
 
     Args:
-        db: Explicit database path, or None to use env var/default.
+        db: Explicit database path (--db), or None to resolve
+            HISTORY_DB_PATH from the .env file — the same value every
+            other entry point (scheduled.py, MonitorDaemon) uses.
 
     Returns:
         str: The resolved database path.
     """
-    return db or os.getenv('HISTORY_DB_PATH', 'data/send_history.db')
+    return db or str(resolve_history_db_path())
 
 
 def _render_records_table(

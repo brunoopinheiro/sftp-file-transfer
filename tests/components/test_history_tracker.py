@@ -1,16 +1,45 @@
 import os
 import sqlite3
 from datetime import date, datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 from sftp_file_transfer.components.history_tracker import (
+    DEFAULT_DB_PATH,
     HistoryTracker,
     SendHistory,
+    resolve_history_db_path,
 )
 
 
 def _set_mtime(file_path, when):
     timestamp = when.timestamp()
     os.utime(file_path, (timestamp, timestamp))
+
+
+def test_resolve_history_db_path_defaults_when_env_var_unset(monkeypatch):
+    """Test resolve_history_db_path() falls back to DEFAULT_DB_PATH.
+
+    Guards the single source of truth every entry point (scheduled.py,
+    MonitorDaemon, MonitorApp, history_cli.py) shares, so they can't
+    silently diverge to different files. Patches load_dotenv() so this
+    doesn't depend on whether the developer's own .env happens to set
+    HISTORY_DB_PATH to the same value as the default.
+    """
+    monkeypatch.delenv('HISTORY_DB_PATH', raising=False)
+
+    with patch(
+        'sftp_file_transfer.components.history_tracker.load_dotenv',
+    ):
+        assert resolve_history_db_path() == DEFAULT_DB_PATH
+
+
+def test_resolve_history_db_path_uses_env_var_when_set(monkeypatch, tmp_path):
+    """Test resolve_history_db_path() honors an explicit HISTORY_DB_PATH."""
+    configured_path = tmp_path / 'custom' / 'ledger.db'
+    monkeypatch.setenv('HISTORY_DB_PATH', str(configured_path))
+
+    assert resolve_history_db_path() == Path(configured_path)
 
 
 def test_creates_schema_on_enter(tmp_path):

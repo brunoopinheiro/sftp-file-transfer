@@ -10,7 +10,10 @@ from aioclock.group import Group
 
 from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.file_manager import FileManager
-from sftp_file_transfer.components.history_tracker import HistoryTracker
+from sftp_file_transfer.components.history_tracker import (
+    HistoryTracker,
+    resolve_history_db_path,
+)
 from sftp_file_transfer.components.logger_setup import setup_logger
 from sftp_file_transfer.components.nfce_config import NfceConfig
 from sftp_file_transfer.components.nfce_db_client import build_engine
@@ -151,7 +154,7 @@ def scheduled_task() -> None:
         local_dir_list = os.getenv('LOCAL_PATH')
         remote_dir = os.getenv('REMOTE_PATH')
         file_extension = os.getenv('FILE_EXTENSION')
-        db_path = os.getenv('HISTORY_DB_PATH', 'data/send_history.db')
+        db_path = resolve_history_db_path()
 
         if not local_dir_list or not remote_dir:
             raise ValueError('LOCAL_PATH and REMOTE_PATH must be set in env')

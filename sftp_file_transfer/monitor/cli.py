@@ -11,6 +11,9 @@ import typer
 from typer import Context, Option, Typer
 
 from sftp_file_transfer.components.env_loader import EnvLoader
+from sftp_file_transfer.components.history_tracker import (
+    resolve_history_db_path,
+)
 from sftp_file_transfer.monitor.app import MonitorApp
 from sftp_file_transfer.monitor.client import DaemonClient
 from sftp_file_transfer.monitor.config import (
@@ -18,7 +21,6 @@ from sftp_file_transfer.monitor.config import (
     MonitorConfig,
 )
 from sftp_file_transfer.monitor.daemon import (
-    DEFAULT_HISTORY_DB_PATH,
     DEFAULT_LOCK_PATH,
     MonitorDaemon,
     _is_pid_alive,
@@ -249,7 +251,7 @@ def _attach(theme: Optional[str], lock_info: dict) -> None:
     client = DaemonClient(lock_info['port'])
     monitor_app = MonitorApp(
         client=client,
-        history_db_path=DEFAULT_HISTORY_DB_PATH,
+        history_db_path=resolve_history_db_path(),
         theme_name=theme,
     )
     monitor_app.run()
@@ -433,7 +435,7 @@ def run_daemon_command() -> None:
     async def _serve() -> None:
         EnvLoader()
         daemon = MonitorDaemon(
-            history_db_path=DEFAULT_HISTORY_DB_PATH,
+            history_db_path=resolve_history_db_path(),
             lock_path=DEFAULT_LOCK_PATH,
             site_name=os.getenv('SITE_NAME', ''),
             poll_interval_sec=int(os.getenv('POLL_INTERVAL_SECONDS', '30')),
