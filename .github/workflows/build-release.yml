@@ -1,0 +1,52 @@
+name: Build and release executables
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --with builder
+
+      - name: Build executables
+        run: |
+          poetry run task build
+          poetry run task build_scheduled
+          poetry run task build_history
+          poetry run task build_monitor
+          poetry run pyinstaller sftp-file-transfer-local-copy.spec
+
+      - name: Read project version
+        id: version
+        run: |
+          $version = (poetry version -s)
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
+          name: v${{ steps.version.outputs.version }} build ${{ github.run_number }}
+          files: |
+            dist/sftp-file-transfer.exe
+            dist/sftp-file-transfer-scheduled.exe
+            dist/sftp-file-transfer-history.exe
+            dist/sftp-file-transfer-monitor.exe
+            dist/sftp-file-transfer-local-copy.exe
