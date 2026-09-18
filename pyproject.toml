@@ -112,3 +112,4 @@ build = 'pyinstaller sftp-file-transfer.spec'
 build_scheduled = 'pyinstaller sftp-file-transfer-scheduled.spec'
 build_history = 'pyinstaller sftp-file-transfer-history.spec'
 build_monitor = 'pyinstaller sftp-file-transfer-monitor.spec'
+clean = "python -c \"import shutil; [shutil.rmtree(p, ignore_errors=True) for p in ('logs', 'data')]\""
