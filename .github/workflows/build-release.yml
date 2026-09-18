@@ -31,7 +31,6 @@ jobs:
           poetry run task build_scheduled
           poetry run task build_history
           poetry run task build_monitor
-          poetry run pyinstaller sftp-file-transfer-local-copy.spec
 
       - name: Read project version
         id: version
@@ -49,4 +48,3 @@ jobs:
             dist/sftp-file-transfer-scheduled.exe
             dist/sftp-file-transfer-history.exe
             dist/sftp-file-transfer-monitor.exe
-            dist/sftp-file-transfer-local-copy.exe
