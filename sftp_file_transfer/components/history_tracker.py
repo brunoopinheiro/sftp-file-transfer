@@ -353,7 +353,9 @@ class HistoryTracker:
                 select(SendHistory).where(
                     SendHistory.path_hash.in_(hashes),
                 ),
-            ).scalars().all(),
+            )
+            .scalars()
+            .all(),
         )
 
     def record_attempt(

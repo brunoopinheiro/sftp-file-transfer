@@ -330,12 +330,10 @@ def test_dashboard_connection_style_uses_theme_colors(tmp_path):
         async with app.run_test():
             theme = app.get_theme(app.theme)
             assert (
-                DashboardScreen._connection_style(True, theme)
-                == theme.success
+                DashboardScreen._connection_style(True, theme) == theme.success
             )
             assert (
-                DashboardScreen._connection_style(False, theme)
-                == theme.error
+                DashboardScreen._connection_style(False, theme) == theme.error
             )
             assert DashboardScreen._connection_style(None, theme) == 'dim'
 
@@ -443,6 +441,7 @@ def test_history_screen_filters_by_failed_status(tmp_path):
 
 def test_r_sends_force_run_command_to_the_client(tmp_path):
     """Test pressing 'r' on Dashboard sends a force_run command."""
+
     async def empty_stream():
         return
         yield  # pragma: no cover

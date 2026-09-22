@@ -308,8 +308,8 @@ def main_callback(
 
     if detach:
         typer.echo(
-            f"Monitor daemon started in the background "
-            f"(pid={lock_info['pid']}).",
+            f'Monitor daemon started in the background '
+            f'(pid={lock_info["pid"]}).',
         )
         return
 
@@ -410,13 +410,13 @@ def status_command() -> None:
     state = _fetch_snapshot(lock_info['port'])
     if state is None:
         typer.echo(
-            f"Monitor daemon (pid={lock_info['pid']}) is not responding.",
+            f'Monitor daemon (pid={lock_info["pid"]}) is not responding.',
         )
         return
 
     typer.echo(
-        f"Monitor daemon running "
-        f"(pid={lock_info['pid']}, port={lock_info['port']})\n"
+        f'Monitor daemon running '
+        f'(pid={lock_info["pid"]}, port={lock_info["port"]})\n'
         f'  site: {state.site_name}\n'
         f'  cycle #: {state.cycle_num}\n'
         f'  last cycle: {state.last_cycle_status} @ {state.last_cycle_time}',

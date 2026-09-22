@@ -239,8 +239,7 @@ class DashboardScreen(Screen):
         """
         value_width = cls._STATUS_ROW_WIDTH - cls._STATUS_LABEL_WIDTH
         line = (
-            f'{label.ljust(cls._STATUS_LABEL_WIDTH)}'
-            f'{value.rjust(value_width)}'
+            f'{label.ljust(cls._STATUS_LABEL_WIDTH)}{value.rjust(value_width)}'
         )
         return Text(line, style=style)
 
@@ -482,9 +481,7 @@ class HistoryScreen(Screen):
             known_rows: List[SendHistory] = tracker.list_records()
 
         known_hashes = {row.path_hash for row in known_rows}
-        return [
-            self._display_row_from_ledger(row) for row in known_rows
-        ] + [
+        return [self._display_row_from_ledger(row) for row in known_rows] + [
             self._display_row_from_pending(path)
             for path in self._scan_pending_files(known_hashes)
         ]
@@ -657,8 +654,8 @@ class HistoryScreen(Screen):
         """
         for name, button_id in self._FILTER_BUTTON_IDS.items():
             button = self.query_one(f'#{button_id}', Button)
-            button.variant = 'primary' if name == self.status_filter else (
-                'default'
+            button.variant = (
+                'primary' if name == self.status_filter else ('default')
             )
 
     @on(Button.Pressed, '#status-filters Button')
@@ -895,9 +892,7 @@ class ResendScreen(Screen):
         not_found: List[str] = []
 
         with HistoryTracker(self.app.history_db_path) as tracker:
-            known_hashes = {
-                row.path_hash for row in tracker.list_records()
-            }
+            known_hashes = {row.path_hash for row in tracker.list_records()}
             pending_files = HistoryScreen._scan_pending_files(known_hashes)
 
             for line in lines:
@@ -1149,8 +1144,8 @@ class MonitorApp(App):
         self.register_theme(HIGH_CONTRAST_THEME)
         for incompatible in INCOMPATIBLE_BUILTIN_THEMES:
             self.unregister_theme(incompatible)
-        self.theme = theme_name or MonitorConfig.load().theme or (
-            DEFAULT_THEME
+        self.theme = (
+            theme_name or MonitorConfig.load().theme or (DEFAULT_THEME)
         )
 
     def on_mount(self) -> None:
