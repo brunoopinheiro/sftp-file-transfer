@@ -84,6 +84,10 @@ jobs:
             Write-Output "git ls-remote failed with exit code $code"
             exit 1
           }
+          # git's "no such ref" code is still in $LASTEXITCODE, and the
+          # Actions pwsh wrapper ends every step with `exit $LASTEXITCODE`.
+          # Leaving it there fails the step exactly when the tag is free.
+          exit 0
         env:
           VERSION: ${{ steps.version.outputs.version }}
 
