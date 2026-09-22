@@ -12,14 +12,18 @@ from logging import (
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_LOG_SIZE = 1 * 1024 * 1024  # 1 MB
+# 1 MB x (1 active + 59 backups) = 60 MB, the same retention ceiling
+# as the previous 10 MB x (1 + 5), split into files small enough to
+# open and search individually.
+BACKUP_COUNT = 59
 
 
 def setup_logger(
     log_name: str = 'sftp_file_transfer',
     log_dir: str = 'logs',
     max_bytes: int = MAX_LOG_SIZE,
-    backup_count: int = 5,
+    backup_count: int = BACKUP_COUNT,
     default_level: int = INFO,
 ) -> Logger:
     """Set up a rotating file logger.
@@ -32,7 +36,7 @@ def setup_logger(
         max_bytes (int, optional): The maximum size of the log file before it
             is rotated. Defaults to MAX_LOG_SIZE.
         backup_count (int, optional): The number of backup log files to keep.
-            Defaults to 5.
+            Defaults to BACKUP_COUNT.
         default_level (int, optional): The default logging level.
             Defaults to INFO.
 
