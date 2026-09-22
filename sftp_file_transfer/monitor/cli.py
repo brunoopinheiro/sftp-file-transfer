@@ -21,6 +21,7 @@ from sftp_file_transfer.monitor.config import (
     MonitorConfig,
 )
 from sftp_file_transfer.monitor.daemon import (
+    CYCLE_TIMEOUT_SECONDS,
     DEFAULT_LOCK_PATH,
     MonitorDaemon,
     _is_pid_alive,
@@ -439,6 +440,9 @@ def run_daemon_command() -> None:
             lock_path=DEFAULT_LOCK_PATH,
             site_name=os.getenv('SITE_NAME', ''),
             poll_interval_sec=int(os.getenv('POLL_INTERVAL_SECONDS', '30')),
+            cycle_timeout_sec=int(
+                os.getenv('CYCLE_TIMEOUT_SECONDS', str(CYCLE_TIMEOUT_SECONDS)),
+            ),
         )
         server = await daemon.start_server()
         port = server.sockets[0].getsockname()[1]

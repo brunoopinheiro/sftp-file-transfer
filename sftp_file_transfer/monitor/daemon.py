@@ -32,6 +32,10 @@ DAILY_COUNTS_WINDOW_DAYS = 7
 # RDP session) we drop snapshots for it rather than letting its write
 # buffer grow without bound.
 MAX_CLIENT_BUFFER_BYTES = 1 * 1024 * 1024
+# Upper bound on a single generate/send cycle. A cycle that outlives
+# this is abandoned so the daemon stays answerable to the TUI and to
+# `sftp_monitor stop` instead of appearing frozen.
+CYCLE_TIMEOUT_SECONDS = 900
 
 
 def _running_loop() -> Optional[asyncio.AbstractEventLoop]:
@@ -119,6 +123,7 @@ class MonitorDaemon:
         lock_path: Union[str, Path] = DEFAULT_LOCK_PATH,
         poll_interval_sec: int = 30,
         site_name: str = '',
+        cycle_timeout_sec: float = CYCLE_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize the daemon's state and configuration.
 
@@ -130,6 +135,8 @@ class MonitorDaemon:
             lock_path: Path to the lock file recording pid/port.
             poll_interval_sec: Seconds between scheduled cycles.
             site_name: Display name of the hotel site being monitored.
+            cycle_timeout_sec: Seconds a single cycle may run before it
+                is abandoned.
 
         Returns:
             None.
@@ -141,6 +148,7 @@ class MonitorDaemon:
         )
         self.lock_path = Path(lock_path)
         self.poll_interval_sec = poll_interval_sec
+        self.cycle_timeout_sec = cycle_timeout_sec
         self.state = DashboardState(
             site_name=site_name,
             countdown_sec=poll_interval_sec,
@@ -150,6 +158,7 @@ class MonitorDaemon:
         self._clients: Set[asyncio.StreamWriter] = set()
         self._server: Optional[asyncio.base_events.Server] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._cycle_future: Optional[asyncio.Future] = None
         for handler in list(logger.handlers):
             if isinstance(handler, _DashboardLogHandler):
                 logger.removeHandler(handler)
@@ -496,7 +505,9 @@ class MonitorDaemon:
         `run_cycle()` performs real network/DB I/O, so it's offloaded
         to a worker thread via `asyncio.to_thread` — otherwise the
         event loop (and this daemon's TCP server) would be unresponsive
-        for the whole duration of every cycle.
+        for the whole duration of every cycle. A cycle that overruns
+        `cycle_timeout_sec` is abandoned rather than awaited forever
+        (see `_run_cycle_guarded`).
 
         Returns:
             None.
@@ -506,13 +517,54 @@ class MonitorDaemon:
                 (datetime.now() - self._started_at).total_seconds(),
             )
             if self.state.countdown_sec <= 0:
-                await asyncio.to_thread(self.run_cycle)
+                await self._run_cycle_guarded()
             else:
                 self.state.countdown_sec -= 1
                 self.broadcast_snapshot()
             if self.stopped:
                 break
             await asyncio.sleep(1)
+
+    async def _run_cycle_guarded(self) -> None:
+        """Run one cycle on a worker thread under a wall-clock bound.
+
+        A worker thread cannot be killed, so abandoning a cycle frees
+        the event loop — keeping the TUI, `status` and `stop` answerable
+        — but not the thread itself. While that thread is still going,
+        no further cycle is started, so a stuck cycle can never stack
+        threads that each hold their own SFTP and database connections.
+
+        Returns:
+            None.
+        """
+        if self._cycle_future is not None and not self._cycle_future.done():
+            logger.error(
+                'Cycle #%s is still running after %ss; skipping this tick.',
+                self.state.cycle_num,
+                self.cycle_timeout_sec,
+            )
+            self.state.countdown_sec = self.poll_interval_sec
+            return
+
+        self._cycle_future = asyncio.ensure_future(
+            asyncio.to_thread(self.run_cycle),
+        )
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._cycle_future),
+                timeout=self.cycle_timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                'Cycle #%s exceeded %ss and was abandoned; the monitor '
+                'stays responsive and will retry on the next tick.',
+                self.state.cycle_num,
+                self.cycle_timeout_sec,
+            )
+            self.state.last_cycle_status = 'FAILED'
+            self.state.last_cycle_time = datetime.now().strftime('%H:%M:%S')
+            self.state.countdown_sec = self.poll_interval_sec
+            self.broadcast_snapshot()
 
     async def stop(self) -> None:
         """Signal run_forever() to exit at its next opportunity.

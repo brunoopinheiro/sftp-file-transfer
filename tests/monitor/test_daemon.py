@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from sftp_file_transfer.components.history_tracker import HistoryTracker
 from sftp_file_transfer.monitor.daemon import (
+    CYCLE_TIMEOUT_SECONDS,
     MAX_CLIENT_BUFFER_BYTES,
     MonitorDaemon,
     _is_pid_alive,  # noqa: PLC2701
@@ -597,3 +598,66 @@ def test_broadcast_skips_a_client_whose_backlog_is_over_the_cap(tmp_path):
     healthy_writer.write.assert_called_once()
     # A stalled client is skipped, not disconnected: it may catch up.
     assert stalled_writer in daemon._clients
+
+
+def test_run_forever_abandons_a_cycle_that_overruns_its_timeout(tmp_path):
+    """Test that an overrunning cycle can't leave the daemon unresponsive."""
+    started = threading.Event()
+    release = threading.Event()
+    daemon = _make_daemon(
+        tmp_path,
+        poll_interval_sec=0,
+        cycle_timeout_sec=0.05,
+    )
+
+    def blocking_cycle():
+        started.set()
+        release.wait(timeout=5)
+
+    daemon.run_cycle = blocking_cycle
+
+    async def scenario():
+        task = asyncio.ensure_future(daemon.run_forever())
+        await asyncio.sleep(0.3)
+        daemon.stopped = True
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+
+    asyncio.run(scenario())
+
+    assert started.is_set()
+    assert daemon.state.last_cycle_status == 'FAILED'
+
+
+def test_a_still_running_cycle_never_stacks_a_second_one(tmp_path):
+    """Test that a wedged cycle doesn't spawn another SFTP/DB connection."""
+    starts = []
+    release = threading.Event()
+    daemon = _make_daemon(tmp_path, cycle_timeout_sec=0.05)
+
+    def blocking_cycle():
+        starts.append(1)
+        release.wait(timeout=5)
+
+    daemon.run_cycle = blocking_cycle
+
+    async def scenario():
+        await daemon._run_cycle_guarded()
+        await daemon._run_cycle_guarded()
+        release.set()
+        await asyncio.wait_for(
+            asyncio.shield(daemon._cycle_future),
+            timeout=5,
+        )
+
+    asyncio.run(scenario())
+
+    assert starts == [1]
+    assert daemon.state.countdown_sec == daemon.poll_interval_sec
+
+
+def test_default_cycle_timeout_is_applied_when_not_overridden(tmp_path):
+    """Test that a daemon gets the default wall-clock bound per cycle."""
+    daemon = _make_daemon(tmp_path)
+
+    assert daemon.cycle_timeout_sec == CYCLE_TIMEOUT_SECONDS
