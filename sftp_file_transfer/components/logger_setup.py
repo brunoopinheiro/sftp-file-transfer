@@ -1,3 +1,4 @@
+from datetime import datetime
 from logging import (
     CRITICAL,
     DEBUG,
@@ -11,6 +12,7 @@ from logging import (
 )
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 from sftp_file_transfer import __version__
 
@@ -35,19 +37,65 @@ class ProcessSafeRotatingFileHandler(RotatingFileHandler):
     This handler instead treats a blocked rollover as a transient
     condition: it keeps appending to the current file and retries the
     rollover on a later record.
+
+    Only a sharing violation is tolerated. Any other OSError — a full
+    disk, a read-only directory — is a real fault that would otherwise
+    let the log grow without bound behind a silent retry loop, so it is
+    re-raised for logging's own error path to report.
     """
+
+    #: Consecutive blocked rollovers before the problem is announced.
+    WARN_AFTER_BLOCKED_ROLLOVERS = 10
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize the handler and its blocked-rollover counter.
+
+        Returns:
+            None.
+        """
+        super().__init__(*args, **kwargs)
+        self._blocked_rollovers = 0
 
     def doRollover(self) -> None:
         """Roll the log over, tolerating a rename blocked by another process.
+
+        Raises:
+            OSError: If the rollover failed for any reason other than
+                the file being held open by another process.
 
         Returns:
             None.
         """
         try:
             super().doRollover()
-        except OSError:
+        except PermissionError:
+            self._blocked_rollovers += 1
             if self.stream is None:
                 self.stream = self._open()
+            self._warn_if_persistently_blocked()
+        else:
+            self._blocked_rollovers = 0
+
+    def _warn_if_persistently_blocked(self) -> None:
+        """Note in the log itself that rollover keeps being blocked.
+
+        The warning is written to the log file rather than raised
+        through logging's error path, because the monitor daemon is
+        spawned with stderr redirected to DEVNULL — the log is the only
+        place an operator would ever see it.
+
+        Returns:
+            None.
+        """
+        if self._blocked_rollovers % self.WARN_AFTER_BLOCKED_ROLLOVERS:
+            return
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.stream.write(
+            f'[{timestamp}] WARNING {__name__}: log rollover blocked by '
+            f'another process {self._blocked_rollovers} times in a row; '
+            f'this file is over its size cap.\n',
+        )
+        self.flush()
 
 
 def setup_logger(

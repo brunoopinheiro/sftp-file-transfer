@@ -1,5 +1,6 @@
 import string
 import uuid
+from logging import INFO, LogRecord
 from logging.handlers import RotatingFileHandler
 
 import pytest
@@ -14,6 +15,7 @@ from sftp_file_transfer.components.logger_setup import (
 )
 
 EXPECTED_HANDLER_COUNT = 2
+_SMALL_MAX_BYTES = 128
 ONE_MEGABYTE = 1 * 1024 * 1024
 EXPECTED_RETENTION_BYTES = 60 * 1024 * 1024
 
@@ -241,3 +243,79 @@ def test_process_safe_handler_rolls_over_normally_when_not_blocked(tmp_path):
         handler.close()
 
     assert (tmp_path / 'rollover.log.1').exists()
+
+
+def test_a_rollover_failure_that_is_not_a_lock_is_not_swallowed(
+    tmp_path,
+    monkeypatch,
+):
+    """Test that a full disk is reported rather than silently retried.
+
+    Swallowing every OSError would let the log grow without bound
+    behind a silent retry loop, which is the opposite of the retention
+    guarantee this handler exists to keep.
+    """
+    log_path = tmp_path / 'rollover.log'
+
+    def failing_rollover(self):
+        raise OSError(28, 'No space left on device')
+
+    handler = ProcessSafeRotatingFileHandler(
+        filename=log_path,
+        maxBytes=128,
+        backupCount=2,
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(RotatingFileHandler, 'doRollover', failing_rollover)
+    try:
+        with pytest.raises(OSError, match='No space left'):
+            handler.doRollover()
+    finally:
+        handler.close()
+
+
+def test_rollover_recovers_once_a_real_competing_handle_is_released(
+    tmp_path,
+):
+    """Test that a genuinely locked log is bounded again after release.
+
+    Uses a real second open handle rather than a monkeypatched
+    doRollover, so this exercises the Windows sharing violation the
+    handler was written for instead of certifying the swallow.
+    """
+    log_path = tmp_path / 'contended.log'
+    handler = ProcessSafeRotatingFileHandler(
+        filename=log_path,
+        maxBytes=_SMALL_MAX_BYTES,
+        backupCount=3,
+        encoding='utf-8',
+    )
+    record = LogRecord(
+        name='contended',
+        level=INFO,
+        pathname=__file__,
+        lineno=0,
+        msg='x' * _SMALL_MAX_BYTES,
+        args=(),
+        exc_info=None,
+    )
+
+    # Held open deliberately across the emits below, so it cannot be a
+    # `with` block.
+    blocker = open(log_path, 'a', encoding='utf-8')
+    try:
+        handler.emit(record)
+        handler.emit(record)
+
+        # The rename cannot happen while another handle is open, so the
+        # active file keeps growing past its cap instead of rotating.
+        assert not (tmp_path / 'contended.log.1').exists()
+    finally:
+        blocker.close()
+
+    try:
+        handler.emit(record)
+
+        assert (tmp_path / 'contended.log.1').exists()
+    finally:
+        handler.close()
