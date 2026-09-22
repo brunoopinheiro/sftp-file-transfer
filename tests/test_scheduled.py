@@ -7,10 +7,15 @@ from sftp_file_transfer.components.nfce_generator import (
     NfceExtractionSummary,
 )
 from sftp_file_transfer.scheduled import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    resolve_poll_interval_seconds,
     run_folio_generation_step,
     scheduled_task,
     select_files_to_send,
 )
+
+CONFIGURED_POLL_INTERVAL_SEC = 300
+DOTENV_POLL_INTERVAL_SEC = 120
 
 
 def _set_mtime(file_path, when):
@@ -409,3 +414,46 @@ def test_generation_step_disposes_the_engine_when_extraction_fails(
         run_folio_generation_step()
 
     fake_engine.dispose.assert_called_once_with()
+
+
+def test_poll_interval_is_read_from_the_env_file(monkeypatch):
+    """Test that a configured POLL_INTERVAL_SECONDS is honoured."""
+    monkeypatch.setenv(
+        'POLL_INTERVAL_SECONDS',
+        str(CONFIGURED_POLL_INTERVAL_SEC),
+    )
+
+    assert resolve_poll_interval_seconds() == CONFIGURED_POLL_INTERVAL_SEC
+
+
+def test_poll_interval_falls_back_to_the_default_when_unset(monkeypatch):
+    """Test that an unset POLL_INTERVAL_SECONDS yields the default."""
+    monkeypatch.delenv('POLL_INTERVAL_SECONDS', raising=False)
+    monkeypatch.setattr(
+        'sftp_file_transfer.scheduled.load_dotenv',
+        lambda *args, **kwargs: False,
+    )
+
+    assert resolve_poll_interval_seconds() == DEFAULT_POLL_INTERVAL_SECONDS
+
+
+def test_poll_interval_loads_the_env_file_before_reading(monkeypatch):
+    """Test that the .env file is loaded before the interval is read.
+
+    The interval is needed at import time to build the schedule
+    trigger, which is earlier than any entry point builds an EnvLoader,
+    so reading it without loading .env first silently ignored the
+    configured value.
+    """
+    monkeypatch.delenv('POLL_INTERVAL_SECONDS', raising=False)
+
+    def fake_load_dotenv(*args, **kwargs):
+        os.environ['POLL_INTERVAL_SECONDS'] = str(DOTENV_POLL_INTERVAL_SEC)
+        return True
+
+    monkeypatch.setattr(
+        'sftp_file_transfer.scheduled.load_dotenv',
+        fake_load_dotenv,
+    )
+
+    assert resolve_poll_interval_seconds() == DOTENV_POLL_INTERVAL_SEC

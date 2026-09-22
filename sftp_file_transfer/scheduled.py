@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from aioclock import AioClock, Every
 from aioclock.group import Group
+from dotenv import find_dotenv, load_dotenv
 
 from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.file_manager import FileManager
@@ -25,7 +26,32 @@ from sftp_file_transfer.components.sftp_manager import (
 
 group = Group()
 logger: Logger = setup_logger()
-POLL_INTERVAL_SECONDS = int(os.getenv('POLL_INTERVAL_SECONDS', '30'))
+DEFAULT_POLL_INTERVAL_SECONDS = 30
+
+
+def resolve_poll_interval_seconds() -> int:
+    """Resolve the cycle interval from the project .env file.
+
+    Reads POLL_INTERVAL_SECONDS the same way `resolve_history_db_path`
+    reads HISTORY_DB_PATH, so every entry point agrees on the interval.
+    The .env file must be loaded first: this value is needed at import
+    time to build the schedule trigger, which is earlier than any
+    entry point constructs an `EnvLoader`.
+
+    Returns:
+        int: POLL_INTERVAL_SECONDS from the environment/.env file, or
+            DEFAULT_POLL_INTERVAL_SECONDS if it isn't set.
+    """
+    load_dotenv(find_dotenv())
+    return int(
+        os.getenv(
+            'POLL_INTERVAL_SECONDS',
+            str(DEFAULT_POLL_INTERVAL_SECONDS),
+        ),
+    )
+
+
+POLL_INTERVAL_SECONDS = resolve_poll_interval_seconds()
 
 
 def select_files_to_send(

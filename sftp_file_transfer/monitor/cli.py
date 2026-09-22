@@ -27,6 +27,7 @@ from sftp_file_transfer.monitor.daemon import (
     _is_pid_alive,
 )
 from sftp_file_transfer.monitor.state import DashboardState
+from sftp_file_transfer.scheduled import resolve_poll_interval_seconds
 
 app = Typer()
 
@@ -439,7 +440,7 @@ def run_daemon_command() -> None:
             history_db_path=resolve_history_db_path(),
             lock_path=DEFAULT_LOCK_PATH,
             site_name=os.getenv('SITE_NAME', ''),
-            poll_interval_sec=int(os.getenv('POLL_INTERVAL_SECONDS', '30')),
+            poll_interval_sec=resolve_poll_interval_seconds(),
             cycle_timeout_sec=int(
                 os.getenv('CYCLE_TIMEOUT_SECONDS', str(CYCLE_TIMEOUT_SECONDS)),
             ),
