@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from sftp_file_transfer.components.logger_setup import (
     BACKUP_COUNT,
     MAX_LOG_SIZE,
+    ProcessSafeRotatingFileHandler,
     setup_logger,
 )
 
@@ -44,7 +45,7 @@ def test_setup_logger_first_call_adds_exactly_two_handlers(tmp_path):
 
     assert len(logger.handlers) == EXPECTED_HANDLER_COUNT
     handler_types = {type(h).__name__ for h in logger.handlers}
-    assert 'RotatingFileHandler' in handler_types
+    assert 'ProcessSafeRotatingFileHandler' in handler_types
     assert 'StreamHandler' in handler_types
 
 
@@ -191,3 +192,52 @@ def test_setup_logger_retention_never_exceeds_configured_budget_property(
     log_files = list(log_dir.glob(f'{unique_name}.log*'))
 
     assert len(log_files) <= backup_count + 1
+
+
+def test_setup_logger_keeps_logging_when_rollover_is_blocked(
+    tmp_path,
+    monkeypatch,
+):
+    """Test that a rollover blocked by another process never stops logging."""
+    unique_name = str(uuid.uuid4())
+
+    def blocked_rollover(self):
+        raise PermissionError(32, 'The process cannot access the file')
+
+    monkeypatch.setattr(
+        RotatingFileHandler,
+        'doRollover',
+        blocked_rollover,
+    )
+    logger = setup_logger(
+        log_name=unique_name,
+        log_dir=str(tmp_path),
+        max_bytes=128,
+        backup_count=3,
+    )
+
+    for i in range(50):
+        logger.info(f'blocked rollover probe {i} ' + 'z' * 40)
+
+    log_file = tmp_path / f'{unique_name}.log'
+    contents = log_file.read_text(encoding='utf-8')
+
+    assert 'blocked rollover probe 49' in contents
+    assert not (tmp_path / f'{unique_name}.log.1').exists()
+
+
+def test_process_safe_handler_rolls_over_normally_when_not_blocked(tmp_path):
+    """Test that the handler still performs a real rollover when it can."""
+    log_path = tmp_path / 'rollover.log'
+    handler = ProcessSafeRotatingFileHandler(
+        filename=log_path,
+        maxBytes=128,
+        backupCount=2,
+        encoding='utf-8',
+    )
+    try:
+        handler.doRollover()
+    finally:
+        handler.close()
+
+    assert (tmp_path / 'rollover.log.1').exists()

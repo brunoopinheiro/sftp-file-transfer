@@ -19,6 +19,35 @@ MAX_LOG_SIZE = 1 * 1024 * 1024  # 1 MB
 BACKUP_COUNT = 59
 
 
+class ProcessSafeRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that survives a rollover another process blocks.
+
+    Several entry points write to the same log file at once — notably
+    `sftp_monitor`, whose TUI process runs alongside the background
+    daemon it spawned. On Windows the rename performed during a
+    rollover fails with a sharing violation while any other process
+    holds the file open. The stdlib handler reports that through
+    `logging`'s own error path, which is invisible for a daemon spawned
+    with stderr redirected to DEVNULL, and log writes can stop for good.
+
+    This handler instead treats a blocked rollover as a transient
+    condition: it keeps appending to the current file and retries the
+    rollover on a later record.
+    """
+
+    def doRollover(self) -> None:
+        """Roll the log over, tolerating a rename blocked by another process.
+
+        Returns:
+            None.
+        """
+        try:
+            super().doRollover()
+        except OSError:
+            if self.stream is None:
+                self.stream = self._open()
+
+
 def setup_logger(
     log_name: str = 'sftp_file_transfer',
     log_dir: str = 'logs',
@@ -61,7 +90,7 @@ def setup_logger(
             '[%(asctime)s] %(levelname)s %(name)s: %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S',
         )
-        handler = RotatingFileHandler(
+        handler = ProcessSafeRotatingFileHandler(
             filename=log_path,
             maxBytes=max_bytes,
             backupCount=backup_count,
