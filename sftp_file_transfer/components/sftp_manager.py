@@ -1,4 +1,5 @@
 import logging
+import socket
 from logging import Logger
 from pathlib import Path
 from types import TracebackType
@@ -25,6 +26,18 @@ from sftp_file_transfer.components.logger_setup import setup_logger
 
 logger: Logger = setup_logger()
 CLIENT_NOT_CONNECTED = 'SFTP client is not connected.'
+
+# Bound the TCP connect so an unreachable host fails fast instead of
+# waiting out the platform default.
+CONNECT_TIMEOUT_SECONDS = 15
+# Paramiko never sends keepalives unless asked. Without them a
+# connection killed silently (firewall/NAT idle reaping, VPN flap) is
+# never detected, and the transport's reader thread waits forever.
+KEEPALIVE_INTERVAL_SECONDS = 30
+# Channel.timeout defaults to None, so an SFTP request whose response
+# never arrives blocks indefinitely. This caps how long any single
+# operation may sit with no data at all moving.
+CHANNEL_TIMEOUT_SECONDS = 120
 
 
 class SFTPManagerConfig(TypedDict):
@@ -143,15 +156,20 @@ class SFTPManager:
     def _connect(self) -> None:
         """Establish an SFTP connection.
 
-        Opens a Transport to the configured host and port, then
+        Opens a Transport over a socket with a bounded connect timeout,
         authenticates either via RSA private key (if key_filepath is
-        set) or via username/password. Finally, builds the SFTP
-        client (self._sftp) from the transport.
+        set) or via username/password, then builds the SFTP client
+        (self._sftp) from the transport. Keepalives and a channel
+        timeout are enabled so a connection that dies silently is
+        detected instead of blocking a transfer forever.
+
+        Raises:
+            SSHException: If the TCP connection cannot be established.
 
         Returns:
             None.
         """
-        self._transport = Transport((self.host, self.port))
+        self._transport = Transport(self._open_socket())
         if self.key_filepath:
             private_key = RSAKey.from_private_key_file(
                 self.key_filepath,
@@ -167,7 +185,46 @@ class SFTPManager:
                 password=self.password,
             )
 
+        self._transport.set_keepalive(KEEPALIVE_INTERVAL_SECONDS)
         self._sftp = SFTPClient.from_transport(self._transport)
+        self._apply_channel_timeout()
+
+    def _open_socket(self) -> socket.socket:
+        """Open a TCP socket to the target with a bounded connect timeout.
+
+        Paramiko's own `Transport((host, port))` form calls
+        `socket.connect()` with no timeout, leaving the connect attempt
+        to the platform default. Connecting here instead keeps that
+        bounded, and mirrors paramiko's error type/message so callers
+        and logs see no behavioural change.
+
+        Raises:
+            SSHException: If the connection cannot be established.
+
+        Returns:
+            socket.socket: The connected socket.
+        """
+        try:
+            return socket.create_connection(
+                (self.host, self.port),
+                timeout=CONNECT_TIMEOUT_SECONDS,
+            )
+        except OSError as e:
+            raise SSHException(
+                f'Unable to connect to {self.host}: {e}',
+            ) from e
+
+    def _apply_channel_timeout(self) -> None:
+        """Bound how long a single SFTP request may wait for a response.
+
+        Returns:
+            None.
+        """
+        if self._sftp is None:
+            return
+        channel = self._sftp.get_channel()
+        if channel is not None:
+            channel.settimeout(CHANNEL_TIMEOUT_SECONDS)
 
     def close(self) -> None:
         """Close the SFTP connection.
