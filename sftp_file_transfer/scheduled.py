@@ -15,7 +15,10 @@ from sftp_file_transfer.components.history_tracker import (
     HistoryTracker,
     resolve_history_db_path,
 )
-from sftp_file_transfer.components.logger_setup import setup_logger
+from sftp_file_transfer.components.logger_setup import (
+    log_startup_banner,
+    setup_logger,
+)
 from sftp_file_transfer.components.nfce_config import NfceConfig
 from sftp_file_transfer.components.nfce_db_client import build_engine
 from sftp_file_transfer.components.nfce_generator import run_nfce_extraction
@@ -227,6 +230,7 @@ app.include_group(group)
 
 
 if __name__ == '__main__':  # pragma: no cover
+    log_startup_banner(logger, 'sftp-file-transfer-scheduled')
     print('Starting scheduled SFTP file transfer...')
     print(f'It will run every {POLL_INTERVAL_SECONDS} seconds.')
     print('Press Ctrl+C to exit.')

@@ -14,6 +14,10 @@ from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.history_tracker import (
     resolve_history_db_path,
 )
+from sftp_file_transfer.components.logger_setup import (
+    log_startup_banner,
+    setup_logger,
+)
 from sftp_file_transfer.monitor.app import MonitorApp
 from sftp_file_transfer.monitor.client import DaemonClient
 from sftp_file_transfer.monitor.config import (
@@ -30,6 +34,7 @@ from sftp_file_transfer.monitor.state import DashboardState
 from sftp_file_transfer.scheduled import resolve_poll_interval_seconds
 
 app = Typer()
+logger = setup_logger()
 
 _RUN_DAEMON_SUBCOMMAND = '_run_daemon'
 _SNAPSHOT_TIMEOUT_SEC = 2.0
@@ -435,6 +440,7 @@ def run_daemon_command() -> None:
     """
 
     async def _serve() -> None:
+        log_startup_banner(logger, 'sftp-file-transfer-monitor')
         EnvLoader()
         daemon = MonitorDaemon(
             history_db_path=resolve_history_db_path(),

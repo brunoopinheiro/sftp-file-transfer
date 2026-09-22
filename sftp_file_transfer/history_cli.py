@@ -12,9 +12,14 @@ from sftp_file_transfer.components.history_tracker import (
     SendHistory,
     resolve_history_db_path,
 )
+from sftp_file_transfer.components.logger_setup import (
+    log_startup_banner,
+    setup_logger,
+)
 
 app = Typer()
 console = Console()
+logger = setup_logger()
 
 _DB_HELP = (
     'Path to the send_history.db ledger (defaults to HISTORY_DB_PATH env var).'
@@ -342,6 +347,7 @@ def main_callback(
     Returns:
         None.
     """
+    log_startup_banner(logger, 'sftp-file-transfer-history')
     if ctx.invoked_subcommand:
         return
     _interactive_menu(db)

@@ -22,6 +22,7 @@ from textual.widgets import (
     TextArea,
 )
 
+from sftp_file_transfer import __version__
 from sftp_file_transfer.components.file_manager import FileManager
 from sftp_file_transfer.components.history_tracker import (
     HistoryTracker,
@@ -165,7 +166,11 @@ class DashboardScreen(Screen):
         status_widget.border_title = 'STATUS'
         status_widget.update(
             Text('\n').join([
-                self._status_row('SITE', state.site_name, style='dim'),
+                self._status_row(
+                    'SITE',
+                    f'{state.site_name} · v{__version__}',
+                    style='dim',
+                ),
                 self._status_row(
                     'LAST CYCLE',
                     f'{state.last_cycle_status} · {state.last_cycle_time}',

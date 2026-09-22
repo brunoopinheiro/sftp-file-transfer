@@ -12,6 +12,8 @@ from logging import (
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from sftp_file_transfer import __version__
+
 MAX_LOG_SIZE = 1 * 1024 * 1024  # 1 MB
 # 1 MB x (1 active + 59 backups) = 60 MB, the same retention ceiling
 # as the previous 10 MB x (1 + 5), split into files small enough to
@@ -104,3 +106,20 @@ def setup_logger(
         logger.addHandler(console)
 
     return logger
+
+
+def log_startup_banner(logger: Logger, entry_point: str) -> None:
+    """Record which build is running, as the first line of a run.
+
+    Without this a site's log cannot be traced back to the build that
+    produced it, which is exactly the gap felt when diagnosing an
+    incident from logs alone.
+
+    Args:
+        logger (Logger): The logger to write the banner to.
+        entry_point (str): Name of the executable/entry point starting.
+
+    Returns:
+        None.
+    """
+    logger.info('Starting %s (version %s)', entry_point, __version__)
