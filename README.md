@@ -103,6 +103,7 @@ REMOTE_PATH="/uploads"
 FILE_EXTENSION=".xml"
 HISTORY_DB_PATH="data/send_history.db"
 POLL_INTERVAL_SECONDS=30
+CYCLE_TIMEOUT_SECONDS=900
 ```
 
 - `LOCAL_PATH`: semicolon-separated list of directories to scan for files to send.
@@ -110,6 +111,7 @@ POLL_INTERVAL_SECONDS=30
 - `FILE_EXTENSION`: optional; if unset, all files are sent regardless of extension.
 - `HISTORY_DB_PATH`: optional; defaults to `data/send_history.db`.
 - `POLL_INTERVAL_SECONDS`: optional; defaults to `30`.
+- `CYCLE_TIMEOUT_SECONDS`: optional; defaults to `900` (15 minutes). Upper bound on a single generate → send cycle in `sftp_monitor`. A cycle that overruns it is abandoned and logged, so the daemon stays answerable to the TUI and to `sftp_monitor stop` instead of appearing frozen. No further cycle starts while the abandoned one is still running.
 
 ### Generation — option A: direct database extraction (preferred)
 
