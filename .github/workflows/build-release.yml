@@ -8,7 +8,31 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Lint
+        run: poetry run ruff check .
+
+      - name: Test
+        run: poetry run pytest
+
   build:
+    needs: verify
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -38,11 +62,38 @@ jobs:
           $version = (poetry version -s)
           echo "version=$version" >> $env:GITHUB_OUTPUT
 
+      # pyproject.toml is the source of truth for the version, so a
+      # release is cut by bumping it. Ordinary merges still build and
+      # verify, but publish nothing.
+      - name: Check whether this version was already released
+        id: released
+        run: |
+          $tag = "v$($env:VERSION)"
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+          $code = $LASTEXITCODE
+          # 0 = the tag exists, 2 = no such ref. Anything else is a real
+          # failure (network, auth) and must not be mistaken for "free",
+          # which would publish over an already-released version.
+          if ($code -eq 0) {
+            Write-Output "Tag $tag already exists; skipping release."
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } elseif ($code -eq 2) {
+            Write-Output "Tag $tag is free; releasing."
+            "exists=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Output "git ls-remote failed with exit code $code"
+            exit 1
+          }
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
       - name: Create release
+        if: steps.released.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
-          name: v${{ steps.version.outputs.version }} build ${{ github.run_number }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
           files: |
             dist/sftp-file-transfer.exe
             dist/sftp-file-transfer-scheduled.exe

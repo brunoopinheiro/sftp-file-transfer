@@ -6,12 +6,17 @@ from typer import Context, Option, Typer
 
 from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.file_manager import FileManager
+from sftp_file_transfer.components.logger_setup import (
+    log_startup_banner,
+    setup_logger,
+)
 from sftp_file_transfer.components.sftp_manager import (
     SFTPManager,
     SFTPManagerConfig,
 )
 
 app = Typer()
+logger = setup_logger()
 
 
 @app.callback(invoke_without_command=True)
@@ -61,6 +66,7 @@ def main(
     """
     if ctx.invoked_subcommand:
         return
+    log_startup_banner(logger, 'sftp-file-transfer')
     try:
         env = EnvLoader()
         config = SFTPManagerConfig(

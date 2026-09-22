@@ -27,6 +27,28 @@ logger: Logger = setup_logger()
 DEFAULT_LOCK_PATH = Path('data') / 'monitor.lock'
 MAX_LOG_LINES = 200
 DAILY_COUNTS_WINDOW_DAYS = 7
+# A snapshot is the complete state, so a later one fully supersedes an
+# earlier one. If a client stops reading (minimised terminal, suspended
+# RDP session) we drop snapshots for it rather than letting its write
+# buffer grow without bound.
+MAX_CLIENT_BUFFER_BYTES = 1 * 1024 * 1024
+# Upper bound on a single generate/send cycle. A cycle that outlives
+# this is abandoned so the daemon stays answerable to the TUI and to
+# `sftp_monitor stop` instead of appearing frozen.
+CYCLE_TIMEOUT_SECONDS = 900
+
+
+def _running_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """Return the event loop running on this thread, if there is one.
+
+    Returns:
+        Optional[asyncio.AbstractEventLoop]: The running loop, or None
+            when called from a worker thread.
+    """
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -101,6 +123,7 @@ class MonitorDaemon:
         lock_path: Union[str, Path] = DEFAULT_LOCK_PATH,
         poll_interval_sec: int = 30,
         site_name: str = '',
+        cycle_timeout_sec: float = CYCLE_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize the daemon's state and configuration.
 
@@ -112,6 +135,8 @@ class MonitorDaemon:
             lock_path: Path to the lock file recording pid/port.
             poll_interval_sec: Seconds between scheduled cycles.
             site_name: Display name of the hotel site being monitored.
+            cycle_timeout_sec: Seconds a single cycle may run before it
+                is abandoned.
 
         Returns:
             None.
@@ -123,6 +148,7 @@ class MonitorDaemon:
         )
         self.lock_path = Path(lock_path)
         self.poll_interval_sec = poll_interval_sec
+        self.cycle_timeout_sec = cycle_timeout_sec
         self.state = DashboardState(
             site_name=site_name,
             countdown_sec=poll_interval_sec,
@@ -131,6 +157,8 @@ class MonitorDaemon:
         self._started_at = datetime.now()
         self._clients: Set[asyncio.StreamWriter] = set()
         self._server: Optional[asyncio.base_events.Server] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._cycle_future: Optional[asyncio.Future] = None
         for handler in list(logger.handlers):
             if isinstance(handler, _DashboardLogHandler):
                 logger.removeHandler(handler)
@@ -245,6 +273,7 @@ class MonitorDaemon:
             nfce_config = NfceConfig()
         except ValueError:
             return None
+        engine = None
         try:
             engine = build_engine(
                 host=nfce_config.nfce_db_host,
@@ -258,6 +287,9 @@ class MonitorDaemon:
         except Exception as e:
             logger.error(f'NFCe DB connectivity probe failed: {e}')
             return False
+        finally:
+            if engine is not None:
+                engine.dispose()
 
     def _compute_daily_counts(self) -> List[int]:
         """Count successfully-sent files per day for the trailing window.
@@ -351,7 +383,31 @@ class MonitorDaemon:
     def broadcast_snapshot(self) -> None:
         """Send the current full state snapshot to every connected client.
 
+        `run_cycle()` runs on a worker thread and every log record it
+        emits reaches this method via `_DashboardLogHandler`, but
+        `StreamWriter.write()` may only be called on the event loop's
+        own thread. When called from anywhere else, the write is handed
+        back to the loop instead of mutating the transport's buffer
+        from under it.
+
         Silently drops clients whose connection has broken.
+
+        Returns:
+            None.
+        """
+        loop = self._loop
+        if loop is not None and loop is not _running_loop():
+            try:
+                loop.call_soon_threadsafe(self._write_snapshot)
+            except RuntimeError:
+                pass
+            return
+        self._write_snapshot()
+
+    def _write_snapshot(self) -> None:
+        """Write the current snapshot to every client, dropping dead ones.
+
+        Must be called on the event loop's thread.
 
         Returns:
             None.
@@ -359,9 +415,26 @@ class MonitorDaemon:
         payload = (self.state.to_json() + '\n').encode('utf-8')
         for client in list(self._clients):
             try:
+                if self._is_backlogged(client):
+                    continue
                 client.write(payload)
             except (ConnectionError, OSError):
                 self._clients.discard(client)
+
+    @staticmethod
+    def _is_backlogged(client: asyncio.StreamWriter) -> bool:
+        """Report whether a client is too far behind to send more to it.
+
+        Args:
+            client: The stream writer for a connected client.
+
+        Returns:
+            bool: True if the client's unsent backlog is over the cap.
+        """
+        transport = client.transport
+        if transport is None:
+            return False
+        return transport.get_write_buffer_size() > MAX_CLIENT_BUFFER_BYTES
 
     async def _handle_command(self, command: dict) -> None:
         """Dispatch a single command received from a client.
@@ -416,6 +489,7 @@ class MonitorDaemon:
                 listening (its bound port is available via
                 `server.sockets[0].getsockname()[1]`).
         """
+        self._loop = asyncio.get_running_loop()
         self._server = await asyncio.start_server(
             self._handle_client,
             host='127.0.0.1',
@@ -431,7 +505,9 @@ class MonitorDaemon:
         `run_cycle()` performs real network/DB I/O, so it's offloaded
         to a worker thread via `asyncio.to_thread` — otherwise the
         event loop (and this daemon's TCP server) would be unresponsive
-        for the whole duration of every cycle.
+        for the whole duration of every cycle. A cycle that overruns
+        `cycle_timeout_sec` is abandoned rather than awaited forever
+        (see `_run_cycle_guarded`).
 
         Returns:
             None.
@@ -441,13 +517,54 @@ class MonitorDaemon:
                 (datetime.now() - self._started_at).total_seconds(),
             )
             if self.state.countdown_sec <= 0:
-                await asyncio.to_thread(self.run_cycle)
+                await self._run_cycle_guarded()
             else:
                 self.state.countdown_sec -= 1
                 self.broadcast_snapshot()
             if self.stopped:
                 break
             await asyncio.sleep(1)
+
+    async def _run_cycle_guarded(self) -> None:
+        """Run one cycle on a worker thread under a wall-clock bound.
+
+        A worker thread cannot be killed, so abandoning a cycle frees
+        the event loop — keeping the TUI, `status` and `stop` answerable
+        — but not the thread itself. While that thread is still going,
+        no further cycle is started, so a stuck cycle can never stack
+        threads that each hold their own SFTP and database connections.
+
+        Returns:
+            None.
+        """
+        if self._cycle_future is not None and not self._cycle_future.done():
+            logger.error(
+                'Cycle #%s is still running after %ss; skipping this tick.',
+                self.state.cycle_num,
+                self.cycle_timeout_sec,
+            )
+            self.state.countdown_sec = self.poll_interval_sec
+            return
+
+        self._cycle_future = asyncio.ensure_future(
+            asyncio.to_thread(self.run_cycle),
+        )
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._cycle_future),
+                timeout=self.cycle_timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                'Cycle #%s exceeded %ss and was abandoned; the monitor '
+                'stays responsive and will retry on the next tick.',
+                self.state.cycle_num,
+                self.cycle_timeout_sec,
+            )
+            self.state.last_cycle_status = 'FAILED'
+            self.state.last_cycle_time = datetime.now().strftime('%H:%M:%S')
+            self.state.countdown_sec = self.poll_interval_sec
+            self.broadcast_snapshot()
 
     async def stop(self) -> None:
         """Signal run_forever() to exit at its next opportunity.

@@ -1,17 +1,33 @@
 import asyncio
 import json
 import os
+import threading
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from sftp_file_transfer.components.history_tracker import HistoryTracker
 from sftp_file_transfer.monitor.daemon import (
+    CYCLE_TIMEOUT_SECONDS,
+    MAX_CLIENT_BUFFER_BYTES,
     MonitorDaemon,
     _is_pid_alive,  # noqa: PLC2701
     logger,
 )
 
 DEFAULT_TEST_POLL_INTERVAL_SEC = 45
+
+
+def _broadcast_and_report_thread(daemon):
+    """Broadcast from the calling thread and report which one it was."""
+    daemon.broadcast_snapshot()
+    return threading.get_ident()
+
+
+def _healthy_writer():
+    """Build a stream-writer mock whose transport reports no backlog."""
+    writer = MagicMock()
+    writer.transport.get_write_buffer_size.return_value = 0
+    return writer
 
 
 def _make_daemon(tmp_path, **kwargs):
@@ -483,10 +499,165 @@ def test_server_ignores_malformed_json_command(tmp_path):
 def test_broadcast_snapshot_drops_disconnected_clients_silently(tmp_path):
     """Test broadcasting to a closed writer doesn't raise."""
     daemon = _make_daemon(tmp_path)
-    broken_writer = MagicMock()
+    broken_writer = _healthy_writer()
     broken_writer.write.side_effect = ConnectionResetError()
     daemon._clients.add(broken_writer)
 
     daemon.broadcast_snapshot()
 
     assert broken_writer not in daemon._clients
+
+
+def test_probe_db_disposes_the_engine_it_opened(tmp_path, monkeypatch):
+    """Test that the per-cycle connectivity probe never leaks an engine."""
+    monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
+    monkeypatch.setenv('NFCE_DB_PORT', '3306')
+    monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
+    monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
+    monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
+    monkeypatch.setenv('NFCE_OUTPUT_PATH', str(tmp_path))
+
+    fake_engine = MagicMock()
+    fake_engine.connect.side_effect = OSError('unreachable')
+
+    with patch(
+        'sftp_file_transfer.monitor.daemon.build_engine',
+        return_value=fake_engine,
+    ):
+        daemon = MonitorDaemon(history_db_path=tmp_path / 'history.db')
+
+        assert daemon._probe_db() is False
+
+    fake_engine.dispose.assert_called_once_with()
+
+
+def test_broadcast_from_a_worker_thread_is_handed_back_to_the_event_loop(
+    tmp_path,
+):
+    """Test that a cycle-thread broadcast never writes off-loop."""
+
+    async def scenario():
+        daemon = _make_daemon(tmp_path)
+        server = await daemon.start_server()
+        writing_threads = []
+        writer = _healthy_writer()
+        writer.write.side_effect = lambda _: writing_threads.append(
+            threading.get_ident(),
+        )
+        daemon._clients.add(writer)
+        loop_thread = threading.get_ident()
+        try:
+            worker_thread = await asyncio.to_thread(
+                _broadcast_and_report_thread,
+                daemon,
+            )
+            await asyncio.sleep(0)
+
+            assert worker_thread != loop_thread
+            assert writing_threads == [loop_thread]
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(scenario())
+
+
+def test_broadcast_on_the_loop_thread_writes_directly(tmp_path):
+    """Test that an on-loop broadcast still writes without deferring."""
+
+    async def scenario():
+        daemon = _make_daemon(tmp_path)
+        server = await daemon.start_server()
+        writer = _healthy_writer()
+        daemon._clients.add(writer)
+        try:
+            daemon.broadcast_snapshot()
+
+            writer.write.assert_called_once()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(scenario())
+
+
+def test_broadcast_skips_a_client_whose_backlog_is_over_the_cap(tmp_path):
+    """Test that a client that stopped reading stops receiving snapshots."""
+    daemon = _make_daemon(tmp_path)
+    stalled_writer = MagicMock()
+    stalled_writer.transport.get_write_buffer_size.return_value = (
+        MAX_CLIENT_BUFFER_BYTES + 1
+    )
+    healthy_writer = _healthy_writer()
+    daemon._clients.add(stalled_writer)
+    daemon._clients.add(healthy_writer)
+
+    daemon.broadcast_snapshot()
+
+    stalled_writer.write.assert_not_called()
+    healthy_writer.write.assert_called_once()
+    # A stalled client is skipped, not disconnected: it may catch up.
+    assert stalled_writer in daemon._clients
+
+
+def test_run_forever_abandons_a_cycle_that_overruns_its_timeout(tmp_path):
+    """Test that an overrunning cycle can't leave the daemon unresponsive."""
+    started = threading.Event()
+    release = threading.Event()
+    daemon = _make_daemon(
+        tmp_path,
+        poll_interval_sec=0,
+        cycle_timeout_sec=0.05,
+    )
+
+    def blocking_cycle():
+        started.set()
+        release.wait(timeout=5)
+
+    daemon.run_cycle = blocking_cycle
+
+    async def scenario():
+        task = asyncio.ensure_future(daemon.run_forever())
+        await asyncio.sleep(0.3)
+        daemon.stopped = True
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+
+    asyncio.run(scenario())
+
+    assert started.is_set()
+    assert daemon.state.last_cycle_status == 'FAILED'
+
+
+def test_a_still_running_cycle_never_stacks_a_second_one(tmp_path):
+    """Test that a wedged cycle doesn't spawn another SFTP/DB connection."""
+    starts = []
+    release = threading.Event()
+    daemon = _make_daemon(tmp_path, cycle_timeout_sec=0.05)
+
+    def blocking_cycle():
+        starts.append(1)
+        release.wait(timeout=5)
+
+    daemon.run_cycle = blocking_cycle
+
+    async def scenario():
+        await daemon._run_cycle_guarded()
+        await daemon._run_cycle_guarded()
+        release.set()
+        await asyncio.wait_for(
+            asyncio.shield(daemon._cycle_future),
+            timeout=5,
+        )
+
+    asyncio.run(scenario())
+
+    assert starts == [1]
+    assert daemon.state.countdown_sec == daemon.poll_interval_sec
+
+
+def test_default_cycle_timeout_is_applied_when_not_overridden(tmp_path):
+    """Test that a daemon gets the default wall-clock bound per cycle."""
+    daemon = _make_daemon(tmp_path)
+
+    assert daemon.cycle_timeout_sec == CYCLE_TIMEOUT_SECONDS

@@ -6,7 +6,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 from paramiko import SSHException
 
-from sftp_file_transfer.components.sftp_manager import SFTPManager
+from sftp_file_transfer.components.sftp_manager import (
+    CHANNEL_TIMEOUT_SECONDS,
+    CONNECT_TIMEOUT_SECONDS,
+    KEEPALIVE_INTERVAL_SECONDS,
+    SFTPManager,
+)
 
 
 def test_sftp_connection(sftp_fixture):
@@ -352,11 +357,17 @@ def test_connect_uses_key_based_auth_when_key_filepath_set(tmp_path):
     mock_transport = MagicMock()
     mock_sftp = MagicMock()
 
+    mock_socket = MagicMock()
+
     with (
         patch(
             'sftp_file_transfer.components.sftp_manager.RSAKey.from_private_key_file',
             return_value=mock_key,
         ) as mock_from_key,
+        patch(
+            'sftp_file_transfer.components.sftp_manager.socket.create_connection',
+            return_value=mock_socket,
+        ),
         patch(
             'sftp_file_transfer.components.sftp_manager.Transport',
             return_value=mock_transport,
@@ -372,7 +383,7 @@ def test_connect_uses_key_based_auth_when_key_filepath_set(tmp_path):
         mock_from_key.assert_called_once_with(
             key_filepath, password=key_password
         )
-        mock_transport_class.assert_called_once_with(('localhost', 22))
+        mock_transport_class.assert_called_once_with(mock_socket)
         mock_transport.connect.assert_called_once_with(
             username='testuser',
             pkey=mock_key,
@@ -415,3 +426,112 @@ def test_check_args_matches_isinstance_invariant(
             SFTPManager.check_args(
                 sftp_host, sftp_port, sftp_user, sftp_password
             )
+
+
+def _stall_guard_config() -> dict:
+    """Build a minimal password-auth config for stall-guard tests."""
+    return {
+        'sftp_host': 'localhost',
+        'sftp_port': 22,
+        'sftp_user': 'testuser',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+
+
+def test_connect_bounds_the_tcp_connect_attempt():
+    """Test that the TCP connect is made with an explicit timeout."""
+    with (
+        patch(
+            'sftp_file_transfer.components.sftp_manager.socket.create_connection',
+            return_value=MagicMock(),
+        ) as mock_create_connection,
+        patch('sftp_file_transfer.components.sftp_manager.Transport'),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
+            return_value=MagicMock(),
+        ),
+    ):
+        SFTPManager(_stall_guard_config())._connect()
+
+        mock_create_connection.assert_called_once_with(
+            ('localhost', 22),
+            timeout=CONNECT_TIMEOUT_SECONDS,
+        )
+
+
+def test_connect_enables_keepalive_so_a_dead_peer_is_detected():
+    """Test that keepalives are turned on for the transport."""
+    mock_transport = MagicMock()
+
+    with (
+        patch(
+            'sftp_file_transfer.components.sftp_manager.socket.create_connection',
+            return_value=MagicMock(),
+        ),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.Transport',
+            return_value=mock_transport,
+        ),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
+            return_value=MagicMock(),
+        ),
+    ):
+        SFTPManager(_stall_guard_config())._connect()
+
+        mock_transport.set_keepalive.assert_called_once_with(
+            KEEPALIVE_INTERVAL_SECONDS,
+        )
+
+
+def test_connect_bounds_how_long_a_request_may_stall():
+    """Test that the SFTP channel is given an explicit timeout."""
+    mock_sftp = MagicMock()
+
+    with (
+        patch(
+            'sftp_file_transfer.components.sftp_manager.socket.create_connection',
+            return_value=MagicMock(),
+        ),
+        patch('sftp_file_transfer.components.sftp_manager.Transport'),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
+            return_value=mock_sftp,
+        ),
+    ):
+        SFTPManager(_stall_guard_config())._connect()
+
+        mock_sftp.get_channel.return_value.settimeout.assert_called_once_with(
+            CHANNEL_TIMEOUT_SECONDS,
+        )
+
+
+def test_connect_raises_sshexception_when_the_socket_cannot_connect():
+    """Test that a refused connection still surfaces as an SSHException."""
+    with patch(
+        'sftp_file_transfer.components.sftp_manager.socket.create_connection',
+        side_effect=OSError('refused'),
+    ):
+        with pytest.raises(SSHException, match='Unable to connect to'):
+            SFTPManager(_stall_guard_config())._connect()
+
+
+def test_live_connection_has_keepalive_and_channel_timeout(sftp_fixture):
+    """Test that a real connection comes back with both stall guards set."""
+    with SFTPManager({
+        'sftp_host': sftp_fixture.host,
+        'sftp_port': sftp_fixture.port,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }) as sftp_manager:
+        channel = sftp_manager._sftp.get_channel()
+
+        assert channel.gettimeout() == CHANNEL_TIMEOUT_SECONDS
+        assert (
+            sftp_manager._transport.packetizer._Packetizer__keepalive_interval
+            == KEEPALIVE_INTERVAL_SECONDS
+        )

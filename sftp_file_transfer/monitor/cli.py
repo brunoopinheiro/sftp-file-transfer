@@ -14,6 +14,10 @@ from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.history_tracker import (
     resolve_history_db_path,
 )
+from sftp_file_transfer.components.logger_setup import (
+    log_startup_banner,
+    setup_logger,
+)
 from sftp_file_transfer.monitor.app import MonitorApp
 from sftp_file_transfer.monitor.client import DaemonClient
 from sftp_file_transfer.monitor.config import (
@@ -21,13 +25,16 @@ from sftp_file_transfer.monitor.config import (
     MonitorConfig,
 )
 from sftp_file_transfer.monitor.daemon import (
+    CYCLE_TIMEOUT_SECONDS,
     DEFAULT_LOCK_PATH,
     MonitorDaemon,
     _is_pid_alive,
 )
 from sftp_file_transfer.monitor.state import DashboardState
+from sftp_file_transfer.scheduled import resolve_poll_interval_seconds
 
 app = Typer()
+logger = setup_logger()
 
 _RUN_DAEMON_SUBCOMMAND = '_run_daemon'
 _SNAPSHOT_TIMEOUT_SEC = 2.0
@@ -306,8 +313,8 @@ def main_callback(
 
     if detach:
         typer.echo(
-            f"Monitor daemon started in the background "
-            f"(pid={lock_info['pid']}).",
+            f'Monitor daemon started in the background '
+            f'(pid={lock_info["pid"]}).',
         )
         return
 
@@ -408,13 +415,13 @@ def status_command() -> None:
     state = _fetch_snapshot(lock_info['port'])
     if state is None:
         typer.echo(
-            f"Monitor daemon (pid={lock_info['pid']}) is not responding.",
+            f'Monitor daemon (pid={lock_info["pid"]}) is not responding.',
         )
         return
 
     typer.echo(
-        f"Monitor daemon running "
-        f"(pid={lock_info['pid']}, port={lock_info['port']})\n"
+        f'Monitor daemon running '
+        f'(pid={lock_info["pid"]}, port={lock_info["port"]})\n'
         f'  site: {state.site_name}\n'
         f'  cycle #: {state.cycle_num}\n'
         f'  last cycle: {state.last_cycle_status} @ {state.last_cycle_time}',
@@ -433,12 +440,16 @@ def run_daemon_command() -> None:
     """
 
     async def _serve() -> None:
+        log_startup_banner(logger, 'sftp-file-transfer-monitor')
         EnvLoader()
         daemon = MonitorDaemon(
             history_db_path=resolve_history_db_path(),
             lock_path=DEFAULT_LOCK_PATH,
             site_name=os.getenv('SITE_NAME', ''),
-            poll_interval_sec=int(os.getenv('POLL_INTERVAL_SECONDS', '30')),
+            poll_interval_sec=resolve_poll_interval_seconds(),
+            cycle_timeout_sec=int(
+                os.getenv('CYCLE_TIMEOUT_SECONDS', str(CYCLE_TIMEOUT_SECONDS)),
+            ),
         )
         server = await daemon.start_server()
         port = server.sockets[0].getsockname()[1]

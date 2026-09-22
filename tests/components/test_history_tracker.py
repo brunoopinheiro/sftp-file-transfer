@@ -479,3 +479,44 @@ def test_reset_record_bulk_matches_multiple_rows_by_shared_substring(
         expected_len = 2
         assert len(updated) == expected_len
         assert all(row.sent == 0 for row in updated)
+
+
+def test_record_attempt_handles_a_file_that_no_longer_exists(tmp_path):
+    """Test that recording an attempt for a vanished file does not raise.
+
+    file_date_of() reads the file's mtime, so a file deleted between
+    selection and upload used to raise FileNotFoundError out of
+    record_attempt. In scheduled_task that call sits inside the
+    per-file except, so the error escaped the loop and aborted the
+    whole cycle, silently skipping every remaining file.
+    """
+    db_path = tmp_path / 'history.db'
+    vanished = tmp_path / 'vanished.xml'
+    vanished.touch()
+    resolved = vanished.resolve()
+    vanished.unlink()
+
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(resolved, success=False, error='gone')
+
+        records = tracker.find_records('vanished.xml')
+
+    assert len(records) == 1
+    assert records[0].sent == 0
+    assert records[0].last_error == 'gone'
+
+
+def test_record_attempt_dates_a_vanished_file_to_today(tmp_path):
+    """Test that a vanished file falls back to today's date."""
+    db_path = tmp_path / 'history.db'
+    vanished = tmp_path / 'vanished.xml'
+    vanished.touch()
+    resolved = vanished.resolve()
+    vanished.unlink()
+
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(resolved, success=False, error='gone')
+
+        record = tracker.find_records('vanished.xml')[0]
+
+    assert record.file_date == date.today().isoformat()

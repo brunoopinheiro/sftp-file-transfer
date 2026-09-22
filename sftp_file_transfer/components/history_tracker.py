@@ -159,14 +159,25 @@ class HistoryTracker:
     def file_date_of(local_path: Union[str, Path]) -> date:
         """Extract the file modification date from filesystem metadata.
 
+        Falls back to today when the file is gone. A file can disappear
+        between being selected and being recorded — the NFCe generator
+        writes into the same directory the sender scans — and a missing
+        mtime must not cost us the ledger row, which is the only record
+        that the attempt happened at all.
+
         Args:
             local_path: Path to the file (as str or Path).
 
         Returns:
             date: The file's modification date (mtime), consistent with
-                FileManager.filter_files_by_date semantics.
+                FileManager.filter_files_by_date semantics, or today's
+                date if the file no longer exists.
         """
-        return datetime.fromtimestamp(Path(local_path).stat().st_mtime).date()
+        try:
+            mtime = Path(local_path).stat().st_mtime
+        except OSError:
+            return date.today()
+        return datetime.fromtimestamp(mtime).date()
 
     def get_last_sent_date(self) -> Optional[date]:
         """Retrieve the most recent file date among successfully sent files.
@@ -353,7 +364,9 @@ class HistoryTracker:
                 select(SendHistory).where(
                     SendHistory.path_hash.in_(hashes),
                 ),
-            ).scalars().all(),
+            )
+            .scalars()
+            .all(),
         )
 
     def record_attempt(

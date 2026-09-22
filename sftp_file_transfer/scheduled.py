@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from aioclock import AioClock, Every
 from aioclock.group import Group
+from dotenv import find_dotenv, load_dotenv
 
 from sftp_file_transfer.components.env_loader import EnvLoader
 from sftp_file_transfer.components.file_manager import FileManager
@@ -14,7 +15,10 @@ from sftp_file_transfer.components.history_tracker import (
     HistoryTracker,
     resolve_history_db_path,
 )
-from sftp_file_transfer.components.logger_setup import setup_logger
+from sftp_file_transfer.components.logger_setup import (
+    log_startup_banner,
+    setup_logger,
+)
 from sftp_file_transfer.components.nfce_config import NfceConfig
 from sftp_file_transfer.components.nfce_db_client import build_engine
 from sftp_file_transfer.components.nfce_generator import run_nfce_extraction
@@ -25,7 +29,32 @@ from sftp_file_transfer.components.sftp_manager import (
 
 group = Group()
 logger: Logger = setup_logger()
-POLL_INTERVAL_SECONDS = int(os.getenv('POLL_INTERVAL_SECONDS', '30'))
+DEFAULT_POLL_INTERVAL_SECONDS = 30
+
+
+def resolve_poll_interval_seconds() -> int:
+    """Resolve the cycle interval from the project .env file.
+
+    Reads POLL_INTERVAL_SECONDS the same way `resolve_history_db_path`
+    reads HISTORY_DB_PATH, so every entry point agrees on the interval.
+    The .env file must be loaded first: this value is needed at import
+    time to build the schedule trigger, which is earlier than any
+    entry point constructs an `EnvLoader`.
+
+    Returns:
+        int: POLL_INTERVAL_SECONDS from the environment/.env file, or
+            DEFAULT_POLL_INTERVAL_SECONDS if it isn't set.
+    """
+    load_dotenv(find_dotenv())
+    return int(
+        os.getenv(
+            'POLL_INTERVAL_SECONDS',
+            str(DEFAULT_POLL_INTERVAL_SECONDS),
+        ),
+    )
+
+
+POLL_INTERVAL_SECONDS = resolve_poll_interval_seconds()
 
 
 def select_files_to_send(
@@ -83,7 +112,8 @@ def run_folio_generation_step() -> None:
     Runs the in-house NFCe DB extraction (`NfceConfig` +
     `run_nfce_extraction`) when NFCe DB env vars are configured. Does
     nothing (logs a warning) if they aren't. Any failure is logged,
-    never raised, so the send step still runs afterwards.
+    never raised, so the send step still runs afterwards. The engine is
+    always disposed, so a cycle never leaks a pooled DB connection.
     """
     try:
         nfce_config = NfceConfig()
@@ -93,6 +123,7 @@ def run_folio_generation_step() -> None:
         )
         return
 
+    engine = None
     try:
         engine = build_engine(
             host=nfce_config.nfce_db_host,
@@ -118,6 +149,9 @@ def run_folio_generation_step() -> None:
         )
     except Exception as e:
         logger.error(f'NFCe extraction step failed: {e}')
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 
 @group.task(
@@ -196,6 +230,7 @@ app.include_group(group)
 
 
 if __name__ == '__main__':  # pragma: no cover
+    log_startup_banner(logger, 'sftp-file-transfer-scheduled')
     print('Starting scheduled SFTP file transfer...')
     print(f'It will run every {POLL_INTERVAL_SECONDS} seconds.')
     print('Press Ctrl+C to exit.')

@@ -7,10 +7,15 @@ from sftp_file_transfer.components.nfce_generator import (
     NfceExtractionSummary,
 )
 from sftp_file_transfer.scheduled import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    resolve_poll_interval_seconds,
     run_folio_generation_step,
     scheduled_task,
     select_files_to_send,
 )
+
+CONFIGURED_POLL_INTERVAL_SEC = 300
+DOTENV_POLL_INTERVAL_SEC = 120
 
 
 def _set_mtime(file_path, when):
@@ -355,3 +360,160 @@ def test_scheduled_task_continues_after_one_file_upload_fails(
     assert len(ok_records) == 1
     ok_record = ok_records[0]
     assert ok_record.sent == 1
+
+
+def test_generation_step_disposes_the_engine_on_success(monkeypatch):
+    """Test that a successful cycle never leaks a pooled DB connection."""
+    monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
+    monkeypatch.setenv('NFCE_DB_PORT', '3306')
+    monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
+    monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
+    monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
+    monkeypatch.setenv('NFCE_OUTPUT_PATH', 'C:/output')
+
+    fake_engine = MagicMock()
+
+    with (
+        patch(
+            'sftp_file_transfer.scheduled.build_engine',
+            return_value=fake_engine,
+        ),
+        patch(
+            'sftp_file_transfer.scheduled.run_nfce_extraction',
+            return_value=NfceExtractionSummary(total=1, generated=1),
+        ),
+    ):
+        run_folio_generation_step()
+
+    fake_engine.dispose.assert_called_once_with()
+
+
+def test_generation_step_disposes_the_engine_when_extraction_fails(
+    monkeypatch,
+):
+    """Test that a failed extraction still disposes the engine."""
+    monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
+    monkeypatch.setenv('NFCE_DB_PORT', '3306')
+    monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
+    monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
+    monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
+    monkeypatch.setenv('NFCE_OUTPUT_PATH', 'C:/output')
+
+    fake_engine = MagicMock()
+
+    with (
+        patch(
+            'sftp_file_transfer.scheduled.build_engine',
+            return_value=fake_engine,
+        ),
+        patch(
+            'sftp_file_transfer.scheduled.run_nfce_extraction',
+            side_effect=RuntimeError('extraction blew up'),
+        ),
+    ):
+        run_folio_generation_step()
+
+    fake_engine.dispose.assert_called_once_with()
+
+
+def test_scheduled_task_survives_a_file_that_vanished_mid_cycle(
+    tmp_path,
+    monkeypatch,
+):
+    """Test that a file deleted mid-cycle does not abort the cycle.
+
+    The NFCe generator writes into the same directory the sender scans,
+    so a file can disappear between being selected and being uploaded.
+    Recording that failure used to raise FileNotFoundError out of the
+    per-file except, aborting the whole cycle and silently skipping
+    every remaining file.
+    """
+    source_dir = tmp_path / 'source'
+    source_dir.mkdir()
+    # 'a_' / 'z_' prefixes keep the vanished file first in scan order,
+    # so the survivor is only sent if the cycle really continued.
+    vanishing_file = source_dir / 'a_vanishing.txt'
+    surviving_file = source_dir / 'z_surviving.txt'
+    vanishing_file.touch()
+    surviving_file.touch()
+
+    monkeypatch.setenv('SFTP_HOST', 'localhost')
+    monkeypatch.setenv('SFTP_PORT', '22')
+    monkeypatch.setenv('SFTP_USER', 'user')
+    monkeypatch.setenv('SFTP_PASSWORD', 'pw')
+    monkeypatch.setenv('LOCAL_PATH', str(source_dir))
+    monkeypatch.setenv('REMOTE_PATH', '/uploads')
+    monkeypatch.setenv('HISTORY_DB_PATH', str(tmp_path / 'history.db'))
+    monkeypatch.delenv('FILE_EXTENSION', raising=False)
+
+    def upload_side_effect(local_path, remote_path):
+        """Delete the first file instead of uploading it."""
+        if local_path.name == 'a_vanishing.txt':
+            local_path.unlink()
+            raise OSError('file disappeared before upload')
+
+    mock_sftp = MagicMock()
+    mock_sftp.upload_file.side_effect = upload_side_effect
+    mock_manager = MagicMock()
+    mock_manager.__enter__.return_value = mock_sftp
+
+    with patch(
+        'sftp_file_transfer.scheduled.SFTPManager',
+        return_value=mock_manager,
+    ):
+        scheduled_task()
+
+    expected_upload_attempts = 2
+    assert mock_sftp.upload_file.call_count == expected_upload_attempts
+
+    with HistoryTracker(tmp_path / 'history.db') as tracker:
+        survivor = tracker.find_records('z_surviving.txt')
+        vanished = tracker.find_records('a_vanishing.txt')
+
+    assert len(survivor) == 1
+    assert survivor[0].sent == 1
+    assert len(vanished) == 1
+    assert vanished[0].sent == 0
+
+
+def test_poll_interval_is_read_from_the_env_file(monkeypatch):
+    """Test that a configured POLL_INTERVAL_SECONDS is honoured."""
+    monkeypatch.setenv(
+        'POLL_INTERVAL_SECONDS',
+        str(CONFIGURED_POLL_INTERVAL_SEC),
+    )
+
+    assert resolve_poll_interval_seconds() == CONFIGURED_POLL_INTERVAL_SEC
+
+
+def test_poll_interval_falls_back_to_the_default_when_unset(monkeypatch):
+    """Test that an unset POLL_INTERVAL_SECONDS yields the default."""
+    monkeypatch.delenv('POLL_INTERVAL_SECONDS', raising=False)
+    monkeypatch.setattr(
+        'sftp_file_transfer.scheduled.load_dotenv',
+        lambda *args, **kwargs: False,
+    )
+
+    assert resolve_poll_interval_seconds() == DEFAULT_POLL_INTERVAL_SECONDS
+
+
+def test_poll_interval_loads_the_env_file_before_reading(monkeypatch):
+    """Test that the .env file is loaded before the interval is read.
+
+    The interval is needed at import time to build the schedule
+    trigger, which is earlier than any entry point builds an EnvLoader,
+    so reading it without loading .env first silently ignored the
+    configured value.
+    """
+    monkeypatch.delenv('POLL_INTERVAL_SECONDS', raising=False)
+
+    def fake_load_dotenv(*args, **kwargs):
+        os.environ['POLL_INTERVAL_SECONDS'] = str(DOTENV_POLL_INTERVAL_SEC)
+        return True
+
+    monkeypatch.setattr(
+        'sftp_file_transfer.scheduled.load_dotenv',
+        fake_load_dotenv,
+    )
+
+    assert resolve_poll_interval_seconds() == DOTENV_POLL_INTERVAL_SEC
