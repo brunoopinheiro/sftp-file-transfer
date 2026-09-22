@@ -1,10 +1,10 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -398,6 +398,7 @@ class HistoryScreen(Screen):
 
     status_filter: reactive[str] = reactive('all')
     search_query: reactive[str] = reactive('')
+    _refresh_token: int = 0
 
     def compose(self) -> ComposeResult:  # noqa: PLR6301
         """Build this screen's widget tree.
@@ -437,24 +438,77 @@ class HistoryScreen(Screen):
         """Reload the table from the ledger + local folders, applying
         the active search/status filters.
 
+        Reading the whole ledger and scanning LOCAL_PATH is blocking
+        work, and this runs on every keystroke in the search box, so it
+        is done on a worker thread. Each request carries a token and a
+        stale load is discarded, so a slow scan can never overwrite the
+        results of a newer keystroke.
+
         Returns:
             None.
         """
         self._sync_filter_buttons()
-        table = self.query_one('#history-table', DataTable)
-        table.clear()
+        self._refresh_token += 1
+        self._load_rows(self._refresh_token)
 
-        theme = self.app.get_theme(self.app.theme)
+    @work(thread=True, exclusive=True, group='history-refresh')
+    def _load_rows(self, token: int) -> None:
+        """Gather the table's rows off the UI thread.
+
+        Args:
+            token: The refresh generation this load belongs to.
+
+        Returns:
+            None.
+        """
+        display_rows = self._collect_display_rows()
+        try:
+            self.app.call_from_thread(
+                self._populate_table,
+                display_rows,
+                token,
+            )
+        except RuntimeError:
+            pass  # the app shut down while this load was in flight
+
+    def _collect_display_rows(self) -> List[Dict[str, object]]:
+        """Read the ledger and local folders into display rows.
+
+        Returns:
+            List[Dict[str, object]]: One display row per known or
+                pending file, unfiltered.
+        """
         with HistoryTracker(self.app.history_db_path) as tracker:
             known_rows: List[SendHistory] = tracker.list_records()
 
         known_hashes = {row.path_hash for row in known_rows}
-        display_rows = [
+        return [
             self._display_row_from_ledger(row) for row in known_rows
         ] + [
             self._display_row_from_pending(path)
             for path in self._scan_pending_files(known_hashes)
         ]
+
+    def _populate_table(
+        self,
+        display_rows: List[Dict[str, object]],
+        token: int,
+    ) -> None:
+        """Render the collected rows, honouring the active filters.
+
+        Args:
+            display_rows: Rows gathered by `_collect_display_rows`.
+            token: The refresh generation these rows belong to.
+
+        Returns:
+            None.
+        """
+        if token != self._refresh_token:
+            return
+
+        table = self.query_one('#history-table', DataTable)
+        table.clear()
+        theme = self.app.get_theme(self.app.theme)
 
         query = self.search_query.strip().lower()
         for row in display_rows:
@@ -750,6 +804,8 @@ class ResendScreen(Screen):
         Binding('ctrl+r', 'resend_selected', 'Resend Selected'),
     ]
 
+    _lookup_token: int = 0
+
     def compose(self) -> ComposeResult:  # noqa: PLR6301
         """Build this screen's widget tree.
 
@@ -781,6 +837,10 @@ class ResendScreen(Screen):
     def action_lookup(self) -> None:
         """Resolve every pasted line against the ledger.
 
+        The lookup reads the whole ledger, scans LOCAL_PATH and runs a
+        substring query per pasted line, so it runs on a worker thread
+        rather than blocking the UI.
+
         Returns:
             None.
         """
@@ -792,13 +852,48 @@ class ResendScreen(Screen):
                 if line.strip()
             ),
         )
+        self._lookup_token += 1
+        self._run_lookup(lines, self._lookup_token)
 
-        theme = self.app.get_theme(self.app.theme)
-        results = self.query_one('#resend-results', SelectionList)
-        results.clear_options()
+    @work(thread=True, exclusive=True, group='resend-lookup')
+    def _run_lookup(self, lines: List[str], token: int) -> None:
+        """Resolve the pasted lines off the UI thread.
 
-        matched_lines = 0
+        Args:
+            lines: The deduplicated, stripped lines the user pasted.
+            token: The lookup generation this run belongs to.
+
+        Returns:
+            None.
+        """
+        matches, not_found = self._collect_matches(lines)
+        try:
+            self.app.call_from_thread(
+                self._show_lookup_results,
+                lines,
+                matches,
+                not_found,
+                token,
+            )
+        except RuntimeError:
+            pass  # the app shut down while this lookup was in flight
+
+    def _collect_matches(
+        self,
+        lines: List[str],
+    ) -> Tuple[List[Dict[str, str]], List[str]]:
+        """Resolve each line against the ledger and LOCAL_PATH.
+
+        Args:
+            lines: The deduplicated, stripped lines the user pasted.
+
+        Returns:
+            Tuple: The matched entries (file name, status, path hash and
+                the line that matched) and the lines with no match.
+        """
+        matches: List[Dict[str, str]] = []
         not_found: List[str] = []
+
         with HistoryTracker(self.app.history_db_path) as tracker:
             known_hashes = {
                 row.path_hash for row in tracker.list_records()
@@ -806,45 +901,74 @@ class ResendScreen(Screen):
             pending_files = HistoryScreen._scan_pending_files(known_hashes)
 
             for line in lines:
-                matches: List[SendHistory] = tracker.find_records(line)
+                ledger_rows: List[SendHistory] = tracker.find_records(line)
                 pending_matches = [
                     path
                     for path in pending_files
                     if line.lower() in path.name.lower()
                 ]
-                if not matches and not pending_matches:
+                if not ledger_rows and not pending_matches:
                     not_found.append(line)
                     continue
-                matched_lines += 1
 
-                for row in matches:
-                    status = 'SENT' if row.sent else 'FAILED'
-                    style = HistoryScreen._history_status_style(
-                        status,
-                        theme,
-                    )
-                    label = Text.assemble(
-                        (row.file_name, ''),
-                        '  ',
-                        (status, style),
-                        f"  (matched '{line}')",
-                    )
-                    results.add_options([(label, row.path_hash, True)])
-
+                for row in ledger_rows:
+                    matches.append({
+                        'file_name': row.file_name,
+                        'status': 'SENT' if row.sent else 'FAILED',
+                        'path_hash': row.path_hash,
+                        'line': line,
+                    })
                 for path in pending_matches:
-                    style = HistoryScreen._history_status_style(
-                        'PENDING',
-                        theme,
-                    )
-                    label = Text.assemble(
-                        (path.name, ''),
-                        '  ',
-                        ('PENDING', style),
-                        f"  (matched '{line}')",
-                    )
-                    path_hash = HistoryTracker.hash_path(path)
-                    results.add_options([(label, path_hash, True)])
+                    matches.append({
+                        'file_name': path.name,
+                        'status': 'PENDING',
+                        'path_hash': HistoryTracker.hash_path(path),
+                        'line': line,
+                    })
 
+        return matches, not_found
+
+    def _show_lookup_results(
+        self,
+        lines: List[str],
+        matches: List[Dict[str, str]],
+        not_found: List[str],
+        token: int,
+    ) -> None:
+        """Render the resolved matches and the summary line.
+
+        Args:
+            lines: The lines the user pasted.
+            matches: Entries resolved by `_collect_matches`.
+            not_found: Lines that matched nothing.
+            token: The lookup generation these results belong to.
+
+        Returns:
+            None.
+        """
+        if token != self._lookup_token:
+            return
+
+        theme = self.app.get_theme(self.app.theme)
+        results = self.query_one('#resend-results', SelectionList)
+        results.clear_options()
+
+        for match in matches:
+            label = Text.assemble(
+                (match['file_name'], ''),
+                '  ',
+                (
+                    match['status'],
+                    HistoryScreen._history_status_style(
+                        match['status'],
+                        theme,
+                    ),
+                ),
+                f"  (matched '{match['line']}')",
+            )
+            results.add_options([(label, match['path_hash'], True)])
+
+        matched_lines = len(lines) - len(not_found)
         summary = (
             f'{len(lines)} line(s) pasted, {matched_lines} matched, '
             f'{len(not_found)} not found.'
@@ -874,13 +998,38 @@ class ResendScreen(Screen):
             self._status_widget().update('Nothing selected to resend.')
             return
 
+        self._run_resend(selected)
+
+    @work(thread=True, group='resend-apply')
+    def _run_resend(self, selected: List[str]) -> None:
+        """Reset the selected records off the UI thread.
+
+        Args:
+            selected: Path hashes of the records to requeue.
+
+        Returns:
+            None.
+        """
         with HistoryTracker(self.app.history_db_path) as tracker:
             for path_hash in selected:
                 tracker.reset_record(path_hash)
-        self.app.send_command({'cmd': 'force_run'})
+        try:
+            self.app.call_from_thread(self._finish_resend, len(selected))
+        except RuntimeError:
+            pass  # the app shut down while the reset was in flight
 
+    def _finish_resend(self, count: int) -> None:
+        """Trigger an immediate cycle and report what was requeued.
+
+        Args:
+            count: How many records were reset to pending.
+
+        Returns:
+            None.
+        """
+        self.app.send_command({'cmd': 'force_run'})
         self._status_widget().update(
-            f'Requeued {len(selected)} file(s) and triggered an '
+            f'Requeued {count} file(s) and triggered an '
             f'immediate cycle — check Dashboard/History for results.',
         )
 

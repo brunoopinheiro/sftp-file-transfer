@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,6 +30,16 @@ def _isolate_local_path_env(monkeypatch):
 
 def _run(coro):
     asyncio.run(coro)
+
+
+async def _settle(app, pilot):
+    """Wait for background data loads to finish and the UI to catch up.
+
+    The History and Resend screens gather their rows on worker threads,
+    so a test must let those finish before asserting on the widgets.
+    """
+    await app.workers.wait_for_complete()
+    await pilot.pause()
 
 
 def test_default_screen_is_dashboard(tmp_path):
@@ -395,7 +406,9 @@ def test_history_screen_lists_ledger_records(tmp_path):
     async def scenario():
         async with app.run_test() as pilot:
             await pilot.press('f2')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
+            await _settle(app, pilot)
             assert table.row_count == 1
 
     _run(scenario())
@@ -418,7 +431,9 @@ def test_history_screen_filters_by_failed_status(tmp_path):
         async with app.run_test() as pilot:
             await pilot.press('f2')
             await pilot.press('3')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
+            await _settle(app, pilot)
             assert table.row_count == 1
             row = table.get_row_at(0)
             assert row[0] == 'failed.txt'
@@ -483,18 +498,23 @@ def test_history_screen_filter_all_then_sent_then_clear(tmp_path):
         async with app.run_test() as pilot:
             await pilot.press('f2')
             await pilot.press('2')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
+            await _settle(app, pilot)
             assert table.row_count == 1
 
             await pilot.press('1')
+            await _settle(app, pilot)
             assert table.row_count == total_records
 
             await pilot.press('/')
             for char in 'sent':
                 await pilot.press(char)
+            await _settle(app, pilot)
             assert table.row_count == 1
 
             await pilot.press('escape')
+            await _settle(app, pilot)
             assert table.row_count == total_records
             assert not app.screen.query_one('#search-input').value
 
@@ -516,6 +536,7 @@ def test_history_screen_shows_new_columns(tmp_path):
     async def scenario():
         async with app.run_test() as pilot:
             await pilot.press('f2')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
             columns = [str(c.label) for c in table.columns.values()]
             assert columns == [
@@ -548,6 +569,7 @@ def test_history_screen_generated_column_is_a_full_datetime(tmp_path):
     async def scenario():
         async with app.run_test() as pilot:
             await pilot.press('f2')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
             row = table.get_row_at(0)
             assert row[1] == expected_generated
@@ -574,6 +596,7 @@ def test_history_screen_generated_falls_back_to_ledger_date_if_file_gone(
     async def scenario():
         async with app.run_test() as pilot:
             await pilot.press('f2')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
             row = table.get_row_at(0)
             assert row[1] == expected_file_date
@@ -604,6 +627,7 @@ def test_history_screen_shows_pending_files_from_local_path(
     async def scenario():
         async with app.run_test() as pilot:
             await pilot.press('f2')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
             statuses = {
                 table.get_row_at(i)[0]: str(table.get_row_at(i)[3])
@@ -637,15 +661,21 @@ def test_history_screen_filter_pending_button_and_key(tmp_path, monkeypatch):
         async with app.run_test() as pilot:
             await pilot.press('f2')
             await pilot.press('4')
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
+            await _settle(app, pilot)
             assert table.row_count == 1
+            await _settle(app, pilot)
             assert table.get_row_at(0)[0] == 'pending.txt'
 
             await pilot.click('#filter-all')
+            await _settle(app, pilot)
             assert table.row_count == total_records
 
             await pilot.click('#filter-pending')
+            await _settle(app, pilot)
             assert table.row_count == 1
+            await _settle(app, pilot)
             assert table.get_row_at(0)[0] == 'pending.txt'
 
     _run(scenario())
@@ -716,7 +746,9 @@ def test_history_screen_search_filters_by_filename(tmp_path):
             await pilot.press('/')
             for char in 'alpha':
                 await pilot.press(char)
+            await _settle(app, pilot)
             table = app.screen.query_one('#history-table')
+            await _settle(app, pilot)
             assert table.row_count == 1
 
     _run(scenario())
@@ -753,8 +785,10 @@ def test_resend_lookup_resolves_full_filename_and_bare_identifier(
             textarea = app.screen.query_one('#resend-textarea', TextArea)
             textarea.text = 'invoice_002356.txt\n002356'
             await pilot.click('#lookup-button')
+            await _settle(app, pilot)
             results = app.screen.query_one('#resend-results', SelectionList)
             expected_option_count = 2
+            await _settle(app, pilot)
             assert results.option_count == expected_option_count
 
     _run(scenario())
@@ -771,7 +805,9 @@ def test_resend_lookup_reports_lines_with_no_match(tmp_path):
             textarea = app.screen.query_one('#resend-textarea', TextArea)
             textarea.text = 'does-not-exist'
             await pilot.click('#lookup-button')
+            await _settle(app, pilot)
             results = app.screen.query_one('#resend-results', SelectionList)
+            await _settle(app, pilot)
             assert results.option_count == 0
             status = str(
                 app.screen.query_one('#resend-status').content,
@@ -804,8 +840,10 @@ def test_resend_lookup_lists_each_ambiguous_match_separately(tmp_path):
             textarea = app.screen.query_one('#resend-textarea', TextArea)
             textarea.text = 'batch'
             await pilot.click('#lookup-button')
+            await _settle(app, pilot)
             results = app.screen.query_one('#resend-results', SelectionList)
             expected_option_count = 2
+            await _settle(app, pilot)
             assert results.option_count == expected_option_count
 
     _run(scenario())
@@ -834,7 +872,9 @@ def test_resend_lookup_includes_never_attempted_local_files(
             textarea = app.screen.query_one('#resend-textarea', TextArea)
             textarea.text = 'never_attempted'
             await pilot.click('#lookup-button')
+            await _settle(app, pilot)
             results = app.screen.query_one('#resend-results', SelectionList)
+            await _settle(app, pilot)
             assert results.option_count == 1
             status = str(
                 app.screen.query_one('#resend-status').content,
@@ -877,6 +917,7 @@ def test_resend_selected_includes_pending_file_in_forced_cycle(
             textarea.text = 'pending_only.txt'
             await pilot.click('#lookup-button')
             await pilot.click('#resend-button')
+            await _settle(app, pilot)
             await pilot.pause()
 
     asyncio.run(scenario())
@@ -912,6 +953,7 @@ def test_resend_selected_resets_sent_record_and_forces_a_cycle(tmp_path):
             textarea.text = 'sent.txt'
             await pilot.click('#lookup-button')
             await pilot.click('#resend-button')
+            await _settle(app, pilot)
             await pilot.pause()
 
     asyncio.run(scenario())
@@ -950,6 +992,7 @@ def test_resend_selected_with_deselected_row_is_excluded(tmp_path):
             textarea = app.screen.query_one('#resend-textarea', TextArea)
             textarea.text = 'keep_sent.txt\nresend_me.txt'
             await pilot.click('#lookup-button')
+            await _settle(app, pilot)
             results = app.screen.query_one(
                 '#resend-results',
                 SelectionList,
@@ -957,6 +1000,7 @@ def test_resend_selected_with_deselected_row_is_excluded(tmp_path):
             keep_hash = HistoryTracker.hash_path(keep_sent_file)
             results.deselect(keep_hash)
             await pilot.click('#resend-button')
+            await _settle(app, pilot)
             await pilot.pause()
 
     asyncio.run(scenario())
@@ -989,6 +1033,7 @@ def test_resend_selected_with_nothing_selected_is_a_noop(tmp_path):
         async with app.run_test() as pilot:
             await pilot.press('f4')
             await pilot.click('#resend-button')
+            await _settle(app, pilot)
             await pilot.pause()
             status = str(
                 app.screen.query_one('#resend-status').content,
@@ -998,3 +1043,105 @@ def test_resend_selected_with_nothing_selected_is_a_noop(tmp_path):
     asyncio.run(scenario())
 
     mock_client.send_command.assert_not_called()
+
+
+def test_history_rows_are_gathered_off_the_ui_thread(tmp_path):
+    """Test the ledger read and LOCAL_PATH scan never block the UI."""
+    db_path = tmp_path / 'history.db'
+    sent_file = tmp_path / 'sent.txt'
+    sent_file.touch()
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(sent_file, success=True)
+
+    app = MonitorApp(history_db_path=db_path)
+    gathering_threads = []
+    original = HistoryScreen._collect_display_rows
+
+    def recording_collect(self):
+        gathering_threads.append(threading.get_ident())
+        return original(self)
+
+    HistoryScreen._collect_display_rows = recording_collect
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f2')
+            await _settle(app, pilot)
+            assert app.screen.query_one('#history-table').row_count == 1
+
+    try:
+        _run(scenario())
+    finally:
+        HistoryScreen._collect_display_rows = original
+
+    assert gathering_threads
+    assert threading.get_ident() not in gathering_threads
+
+
+def test_a_stale_history_load_never_overwrites_a_newer_one(tmp_path):
+    """Test an outdated load's rows are discarded, not rendered.
+
+    Every keystroke in the search box starts a load, so a slow one
+    must not land after a newer one and show the wrong rows.
+    """
+    db_path = tmp_path / 'history.db'
+    sent_file = tmp_path / 'sent.txt'
+    sent_file.touch()
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(sent_file, success=True)
+
+    app = MonitorApp(history_db_path=db_path)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f2')
+            await _settle(app, pilot)
+            screen = app.screen
+            table = screen.query_one('#history-table')
+            row_count_before = table.row_count
+
+            stale_token = screen._refresh_token - 1
+            screen._populate_table([], stale_token)
+
+            await _settle(app, pilot)
+            assert table.row_count == row_count_before
+
+    _run(scenario())
+
+
+def test_resend_lookup_runs_off_the_ui_thread(tmp_path):
+    """Test the Resend screen's lookup never blocks the UI."""
+    db_path = tmp_path / 'history.db'
+    sent_file = tmp_path / 'resend_me.txt'
+    sent_file.touch()
+    with HistoryTracker(db_path) as tracker:
+        tracker.record_attempt(sent_file, success=True)
+
+    app = MonitorApp(history_db_path=db_path)
+    lookup_threads = []
+    original = ResendScreen._collect_matches
+
+    def recording_collect(self, lines):
+        lookup_threads.append(threading.get_ident())
+        return original(self, lines)
+
+    ResendScreen._collect_matches = recording_collect
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.press('f4')
+            textarea = app.screen.query_one('#resend-textarea', TextArea)
+            textarea.text = 'resend_me.txt'
+            await pilot.click('#lookup-button')
+            await _settle(app, pilot)
+            results = app.screen.query_one('#resend-results', SelectionList)
+            await _settle(app, pilot)
+            assert results.option_count == 1
+
+    try:
+        _run(scenario())
+    finally:
+        ResendScreen._collect_matches = original
+
+    assert lookup_threads
+    assert threading.get_ident() not in lookup_threads
