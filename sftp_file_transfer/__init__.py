@@ -4,4 +4,4 @@
 # PyInstaller one-file exe carries no .dist-info to read, so metadata
 # lookup would report the developer's editable install or raise.
 # tests/test_version.py pins this against pyproject.toml.
-__version__ = '1.0.0'
+__version__ = '1.1.0'
