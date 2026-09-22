@@ -83,7 +83,8 @@ def run_folio_generation_step() -> None:
     Runs the in-house NFCe DB extraction (`NfceConfig` +
     `run_nfce_extraction`) when NFCe DB env vars are configured. Does
     nothing (logs a warning) if they aren't. Any failure is logged,
-    never raised, so the send step still runs afterwards.
+    never raised, so the send step still runs afterwards. The engine is
+    always disposed, so a cycle never leaks a pooled DB connection.
     """
     try:
         nfce_config = NfceConfig()
@@ -93,6 +94,7 @@ def run_folio_generation_step() -> None:
         )
         return
 
+    engine = None
     try:
         engine = build_engine(
             host=nfce_config.nfce_db_host,
@@ -118,6 +120,9 @@ def run_folio_generation_step() -> None:
         )
     except Exception as e:
         logger.error(f'NFCe extraction step failed: {e}')
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 
 @group.task(

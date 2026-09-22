@@ -245,6 +245,7 @@ class MonitorDaemon:
             nfce_config = NfceConfig()
         except ValueError:
             return None
+        engine = None
         try:
             engine = build_engine(
                 host=nfce_config.nfce_db_host,
@@ -258,6 +259,9 @@ class MonitorDaemon:
         except Exception as e:
             logger.error(f'NFCe DB connectivity probe failed: {e}')
             return False
+        finally:
+            if engine is not None:
+                engine.dispose()
 
     def _compute_daily_counts(self) -> List[int]:
         """Count successfully-sent files per day for the trailing window.

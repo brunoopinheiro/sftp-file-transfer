@@ -5,6 +5,13 @@ from typing import List
 import sqlalchemy as sa
 from sqlalchemy import Column, Date, Integer, MetaData, String, Table, select
 
+# pymysql applies no read/write timeout of its own, so a server that
+# accepts the connection but never answers would block the cycle
+# indefinitely, exactly as a dead SFTP socket would.
+DB_CONNECT_TIMEOUT_SECONDS = 10
+DB_READ_TIMEOUT_SECONDS = 60
+DB_WRITE_TIMEOUT_SECONDS = 60
+
 
 @dataclass
 class NfceInvoiceRow:
@@ -37,7 +44,12 @@ def build_engine(
 
     Constructs a SQLAlchemy Engine configured with the pymysql driver for
     MySQL database connections. The password is passed via connect_args to
-    keep it out of the engine's repr/logs.
+    keep it out of the engine's repr/logs. Connect/read/write timeouts are
+    set so an unresponsive server surfaces an error instead of stalling the
+    caller, and pooled connections are pre-pinged so one dropped overnight
+    is replaced rather than handed out dead.
+
+    Callers own the returned engine and should dispose() it when done.
 
     Args:
         host: Database host address.
@@ -58,7 +70,13 @@ def build_engine(
     )
     engine = sa.create_engine(
         url,
-        connect_args={'password': password},
+        pool_pre_ping=True,
+        connect_args={
+            'password': password,
+            'connect_timeout': DB_CONNECT_TIMEOUT_SECONDS,
+            'read_timeout': DB_READ_TIMEOUT_SECONDS,
+            'write_timeout': DB_WRITE_TIMEOUT_SECONDS,
+        },
     )
     return engine
 

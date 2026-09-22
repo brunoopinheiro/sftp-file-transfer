@@ -1,9 +1,13 @@
 from datetime import date
+from unittest.mock import patch
 
 import sqlalchemy as sa
 from sqlalchemy import Column, Date, Integer, MetaData, String, Table
 
 from sftp_file_transfer.components.nfce_db_client import (
+    DB_CONNECT_TIMEOUT_SECONDS,
+    DB_READ_TIMEOUT_SECONDS,
+    DB_WRITE_TIMEOUT_SECONDS,
     build_engine,
     fetch_pending_invoice_rows,
 )
@@ -212,3 +216,37 @@ def test_fetch_pending_invoice_rows_returns_empty_list_when_no_matches():
     rows = fetch_pending_invoice_rows(engine, since_date)
 
     assert rows == []
+
+
+def test_build_engine_bounds_every_stage_of_a_db_call():
+    """Test that connect/read/write timeouts are all passed to pymysql."""
+    with patch(
+        'sftp_file_transfer.components.nfce_db_client.sa.create_engine',
+    ) as mock_create_engine:
+        build_engine(
+            host='localhost',
+            port=3306,
+            database='test_db',
+            user='root',
+            password='secret',
+        )
+
+    connect_args = mock_create_engine.call_args.kwargs['connect_args']
+
+    assert connect_args['connect_timeout'] == DB_CONNECT_TIMEOUT_SECONDS
+    assert connect_args['read_timeout'] == DB_READ_TIMEOUT_SECONDS
+    assert connect_args['write_timeout'] == DB_WRITE_TIMEOUT_SECONDS
+    assert connect_args['password'] == 'secret'
+
+
+def test_build_engine_pre_pings_pooled_connections():
+    """Test that a connection dropped while pooled is replaced, not reused."""
+    engine = build_engine(
+        host='localhost',
+        port=3306,
+        database='test_db',
+        user='root',
+        password='secret',
+    )
+
+    assert engine.pool._pre_ping is True

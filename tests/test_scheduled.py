@@ -355,3 +355,57 @@ def test_scheduled_task_continues_after_one_file_upload_fails(
     assert len(ok_records) == 1
     ok_record = ok_records[0]
     assert ok_record.sent == 1
+
+
+def test_generation_step_disposes_the_engine_on_success(monkeypatch):
+    """Test that a successful cycle never leaks a pooled DB connection."""
+    monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
+    monkeypatch.setenv('NFCE_DB_PORT', '3306')
+    monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
+    monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
+    monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
+    monkeypatch.setenv('NFCE_OUTPUT_PATH', 'C:/output')
+
+    fake_engine = MagicMock()
+
+    with (
+        patch(
+            'sftp_file_transfer.scheduled.build_engine',
+            return_value=fake_engine,
+        ),
+        patch(
+            'sftp_file_transfer.scheduled.run_nfce_extraction',
+            return_value=NfceExtractionSummary(total=1, generated=1),
+        ),
+    ):
+        run_folio_generation_step()
+
+    fake_engine.dispose.assert_called_once_with()
+
+
+def test_generation_step_disposes_the_engine_when_extraction_fails(
+    monkeypatch,
+):
+    """Test that a failed extraction still disposes the engine."""
+    monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
+    monkeypatch.setenv('NFCE_DB_PORT', '3306')
+    monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
+    monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
+    monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
+    monkeypatch.setenv('NFCE_OUTPUT_PATH', 'C:/output')
+
+    fake_engine = MagicMock()
+
+    with (
+        patch(
+            'sftp_file_transfer.scheduled.build_engine',
+            return_value=fake_engine,
+        ),
+        patch(
+            'sftp_file_transfer.scheduled.run_nfce_extraction',
+            side_effect=RuntimeError('extraction blew up'),
+        ),
+    ):
+        run_folio_generation_step()
+
+    fake_engine.dispose.assert_called_once_with()

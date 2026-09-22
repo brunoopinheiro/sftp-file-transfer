@@ -490,3 +490,26 @@ def test_broadcast_snapshot_drops_disconnected_clients_silently(tmp_path):
     daemon.broadcast_snapshot()
 
     assert broken_writer not in daemon._clients
+
+
+def test_probe_db_disposes_the_engine_it_opened(tmp_path, monkeypatch):
+    """Test that the per-cycle connectivity probe never leaks an engine."""
+    monkeypatch.setenv('NFCE_DB_HOST', 'db-host')
+    monkeypatch.setenv('NFCE_DB_PORT', '3306')
+    monkeypatch.setenv('NFCE_DB_NAME', 'CHECKPOSTINGDB')
+    monkeypatch.setenv('NFCE_DB_USER', 'nfce_user')
+    monkeypatch.setenv('NFCE_DB_PASSWORD', 'nfce_pw')
+    monkeypatch.setenv('NFCE_OUTPUT_PATH', str(tmp_path))
+
+    fake_engine = MagicMock()
+    fake_engine.connect.side_effect = OSError('unreachable')
+
+    with patch(
+        'sftp_file_transfer.monitor.daemon.build_engine',
+        return_value=fake_engine,
+    ):
+        daemon = MonitorDaemon(history_db_path=tmp_path / 'history.db')
+
+        assert daemon._probe_db() is False
+
+    fake_engine.dispose.assert_called_once_with()
