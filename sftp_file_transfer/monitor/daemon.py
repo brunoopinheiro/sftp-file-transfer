@@ -27,6 +27,24 @@ logger: Logger = setup_logger()
 DEFAULT_LOCK_PATH = Path('data') / 'monitor.lock'
 MAX_LOG_LINES = 200
 DAILY_COUNTS_WINDOW_DAYS = 7
+# A snapshot is the complete state, so a later one fully supersedes an
+# earlier one. If a client stops reading (minimised terminal, suspended
+# RDP session) we drop snapshots for it rather than letting its write
+# buffer grow without bound.
+MAX_CLIENT_BUFFER_BYTES = 1 * 1024 * 1024
+
+
+def _running_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """Return the event loop running on this thread, if there is one.
+
+    Returns:
+        Optional[asyncio.AbstractEventLoop]: The running loop, or None
+            when called from a worker thread.
+    """
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -131,6 +149,7 @@ class MonitorDaemon:
         self._started_at = datetime.now()
         self._clients: Set[asyncio.StreamWriter] = set()
         self._server: Optional[asyncio.base_events.Server] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         for handler in list(logger.handlers):
             if isinstance(handler, _DashboardLogHandler):
                 logger.removeHandler(handler)
@@ -355,7 +374,31 @@ class MonitorDaemon:
     def broadcast_snapshot(self) -> None:
         """Send the current full state snapshot to every connected client.
 
+        `run_cycle()` runs on a worker thread and every log record it
+        emits reaches this method via `_DashboardLogHandler`, but
+        `StreamWriter.write()` may only be called on the event loop's
+        own thread. When called from anywhere else, the write is handed
+        back to the loop instead of mutating the transport's buffer
+        from under it.
+
         Silently drops clients whose connection has broken.
+
+        Returns:
+            None.
+        """
+        loop = self._loop
+        if loop is not None and loop is not _running_loop():
+            try:
+                loop.call_soon_threadsafe(self._write_snapshot)
+            except RuntimeError:
+                pass
+            return
+        self._write_snapshot()
+
+    def _write_snapshot(self) -> None:
+        """Write the current snapshot to every client, dropping dead ones.
+
+        Must be called on the event loop's thread.
 
         Returns:
             None.
@@ -363,9 +406,26 @@ class MonitorDaemon:
         payload = (self.state.to_json() + '\n').encode('utf-8')
         for client in list(self._clients):
             try:
+                if self._is_backlogged(client):
+                    continue
                 client.write(payload)
             except (ConnectionError, OSError):
                 self._clients.discard(client)
+
+    @staticmethod
+    def _is_backlogged(client: asyncio.StreamWriter) -> bool:
+        """Report whether a client is too far behind to send more to it.
+
+        Args:
+            client: The stream writer for a connected client.
+
+        Returns:
+            bool: True if the client's unsent backlog is over the cap.
+        """
+        transport = client.transport
+        if transport is None:
+            return False
+        return transport.get_write_buffer_size() > MAX_CLIENT_BUFFER_BYTES
 
     async def _handle_command(self, command: dict) -> None:
         """Dispatch a single command received from a client.
@@ -420,6 +480,7 @@ class MonitorDaemon:
                 listening (its bound port is available via
                 `server.sockets[0].getsockname()[1]`).
         """
+        self._loop = asyncio.get_running_loop()
         self._server = await asyncio.start_server(
             self._handle_client,
             host='127.0.0.1',
