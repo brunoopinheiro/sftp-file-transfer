@@ -1,7 +1,10 @@
-from datetime import date
+import os
+import socket
+from datetime import date, datetime
 from typing import List, Optional
 
 import typer
+from paramiko import Transport
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
@@ -11,6 +14,13 @@ from sftp_file_transfer.components.history_tracker import (
     HistoryTracker,
     SendHistory,
     resolve_history_db_path,
+)
+from sftp_file_transfer.components.host_pins import (
+    HostPin,
+    format_fingerprint,
+    get_pin,
+    resolve_host_pins_path,
+    save_pin,
 )
 from sftp_file_transfer.components.logger_setup import (
     log_startup_banner,
@@ -24,6 +34,11 @@ logger = setup_logger()
 _DB_HELP = (
     'Path to the send_history.db ledger (defaults to HISTORY_DB_PATH env var).'
 )
+_PINS_HELP = (
+    'Path to the host key pin file (defaults to SFTP_HOST_PINS_PATH env var).'
+)
+_DEFAULT_SFTP_PORT = 22
+_HOST_KEY_PROBE_TIMEOUT_SEC = 15
 
 
 def _resolve_db_path(db: Optional[str]) -> str:
@@ -38,6 +53,133 @@ def _resolve_db_path(db: Optional[str]) -> str:
         str: The resolved database path.
     """
     return db or str(resolve_history_db_path())
+
+
+def _resolve_pins_path(pins: Optional[str]) -> str:
+    """Resolve the host key pin path, falling back to env var/default.
+
+    Args:
+        pins: Explicit pin file path (--pins), or None to resolve
+            SFTP_HOST_PINS_PATH from the .env file — the same value
+            every other entry point uses.
+
+    Returns:
+        str: The resolved pin file path.
+    """
+    return pins or str(resolve_host_pins_path())
+
+
+def _read_host_key(host: str, port: int) -> tuple:
+    """Read a server's host key without authenticating to it.
+
+    Stops after the key exchange, so no credential is ever offered to a
+    server whose identity hasn't been confirmed yet.
+
+    Args:
+        host: SFTP hostname to inspect.
+        port: SFTP port to inspect.
+
+    Returns:
+        tuple: The key type and its SHA256 fingerprint.
+    """
+    sock = socket.create_connection(
+        (host, port),
+        timeout=_HOST_KEY_PROBE_TIMEOUT_SEC,
+    )
+    transport = Transport(sock)
+    try:
+        transport.start_client()
+        key = transport.get_remote_server_key()
+        return key.get_name(), format_fingerprint(key.asbytes())
+    finally:
+        transport.close()
+
+
+def _render_host_key_table(
+    host: str,
+    port: int,
+    stored: Optional[HostPin],
+    key_type: str,
+    fingerprint: str,
+) -> None:
+    """Show the stored and observed host keys side by side."""
+    table = Table(title=f'SFTP host key for {host}:{port}')
+    table.add_column('Field')
+    table.add_column('Value')
+    if stored is None:
+        table.add_row('Stored', '[yellow]no pin yet[/]')
+    else:
+        table.add_row('Stored', f'{stored.key_type} {stored.fingerprint}')
+    table.add_row('Observed', f'{key_type} {fingerprint}')
+    if stored is None:
+        status = '[yellow]no pin yet[/]'
+    elif stored.key_type == key_type and stored.fingerprint == fingerprint:
+        status = '[green]matches[/]'
+    else:
+        status = '[red]MISMATCH[/]'
+    table.add_row('Status', status)
+    console.print(table)
+
+
+def _do_trust_host(
+    host: str,
+    port: int,
+    pins_path: str,
+    yes: bool,
+) -> None:
+    """Read a server's host key and pin it after confirmation.
+
+    Args:
+        host: SFTP hostname to trust.
+        port: SFTP port to trust.
+        pins_path: Path to the host key pin file.
+        yes: If True, skip the confirmation prompt.
+
+    Returns:
+        None.
+    """
+    try:
+        key_type, fingerprint = _read_host_key(host, port)
+    except Exception as e:
+        console.print(f'[red]Could not read the host key: {e}[/]')
+        raise typer.Exit(1)
+
+    stored = get_pin(host, port, pins_path)
+    _render_host_key_table(host, port, stored, key_type, fingerprint)
+
+    if (
+        stored is not None
+        and stored.key_type == key_type
+        and stored.fingerprint == fingerprint
+    ):
+        console.print('[green]This host key is already trusted.[/]')
+        return
+
+    if stored is not None:
+        console.print(
+            '[red]The host key changed. This is expected after a server '
+            'rebuild or key rotation. If you did not expect it, the '
+            'connection may be intercepted -- do not continue.[/]',
+        )
+
+    if not yes and not Confirm.ask('Trust this host key?'):
+        raise typer.Exit(0)
+
+    save_pin(
+        host,
+        port,
+        HostPin(
+            key_type=key_type,
+            fingerprint=fingerprint,
+            pinned_at=datetime.now().isoformat(timespec='seconds'),
+        ),
+        pins_path,
+    )
+    logger.warning(
+        f'Host key for {host}:{port} trusted via the CLI '
+        f'({key_type} {fingerprint}).',
+    )
+    console.print(f'[green]Trusted {key_type} {fingerprint}.[/]')
 
 
 def _render_records_table(
@@ -271,6 +413,44 @@ def reset(
     _do_reset(identifier, _resolve_db_path(db), yes)
 
 
+@app.command('trust-host')
+def trust_host(
+    host: str = Argument(
+        ...,
+        help='SFTP hostname whose key should be trusted.',
+    ),
+    port: int = Option(
+        _DEFAULT_SFTP_PORT,
+        '--port',
+        '-p',
+        help='SFTP port.',
+    ),
+    yes: bool = Option(
+        False,
+        '--yes',
+        '-y',
+        help='Skip the confirmation prompt.',
+    ),
+    pins: Optional[str] = Option(
+        None,
+        '--pins',
+        help=_PINS_HELP,
+    ),
+) -> None:
+    """Trust (or re-trust) an SFTP server's host key.
+
+    Args:
+        host: SFTP hostname whose key should be trusted.
+        port: SFTP port.
+        yes: If True, skip the confirmation prompt.
+        pins: Path to the pin file, defaults to env var/default.
+
+    Returns:
+        None.
+    """
+    _do_trust_host(host, port, _resolve_pins_path(pins), yes)
+
+
 def _interactive_reset(db_path: str) -> None:
     """Interactively prompt and reset a record.
 
@@ -282,6 +462,23 @@ def _interactive_reset(db_path: str) -> None:
     """
     identifier = Prompt.ask('Enter a path substring or hash')
     _do_reset(identifier, db_path, yes=False)
+
+
+def _interactive_trust_host(pins_path: str) -> None:
+    """Interactively prompt for a host and trust its key.
+
+    Args:
+        pins_path: Path to the host key pin file.
+
+    Returns:
+        None.
+    """
+    host = Prompt.ask('SFTP host', default=os.getenv('SFTP_HOST', ''))
+    port = Prompt.ask(
+        'SFTP port',
+        default=os.getenv('SFTP_PORT', str(_DEFAULT_SFTP_PORT)),
+    )
+    _do_trust_host(host, int(port), pins_path, yes=False)
 
 
 def _interactive_menu(db: Optional[str]) -> None:
@@ -307,6 +504,10 @@ def _interactive_menu(db: Optional[str]) -> None:
         '4': (
             'Reset / requeue a record',
             lambda: _interactive_reset(db_path),
+        ),
+        '5': (
+            'Trust an SFTP host key',
+            lambda: _interactive_trust_host(_resolve_pins_path(None)),
         ),
         '0': ('Exit', None),
     }

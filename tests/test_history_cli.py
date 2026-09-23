@@ -1,9 +1,62 @@
+from unittest.mock import MagicMock, patch
+
 from typer.testing import CliRunner
 
+from sftp_file_transfer import history_cli
 from sftp_file_transfer.components.history_tracker import HistoryTracker
+from sftp_file_transfer.components.host_pins import (
+    HostPin,
+    format_fingerprint,
+    get_pin,
+    save_pin,
+)
 from sftp_file_transfer.history_cli import app
 
 runner = CliRunner()
+
+_SERVER_KEY_BLOB = b'\x00\x00\x00\x0bssh-ed25519-fake-blob'
+_SERVER_KEY_TYPE = 'ssh-ed25519'
+
+
+def _mock_transport_with_key(
+    blob=_SERVER_KEY_BLOB,
+    key_type=_SERVER_KEY_TYPE,
+):
+    """Build a mock Transport that presents a fixed host key."""
+    mock_transport = MagicMock()
+    server_key = mock_transport.get_remote_server_key.return_value
+    server_key.asbytes.return_value = blob
+    server_key.get_name.return_value = key_type
+    return mock_transport
+
+
+def _patched_transport(mock_transport):
+    """Patch the paramiko pieces trust-host uses to reach a server."""
+    return (
+        patch(
+            'sftp_file_transfer.history_cli.socket.create_connection',
+            return_value=MagicMock(),
+        ),
+        patch(
+            'sftp_file_transfer.history_cli.Transport',
+            return_value=mock_transport,
+        ),
+    )
+
+
+def test_cli_output_is_plain_text_under_test():
+    """Test rich never emits ANSI in the suite, whatever the terminal.
+
+    Guards the colour setup at the top of tests/conftest.py. Without it,
+    every assertion on CLI output breaks on a machine with FORCE_COLOR
+    set, because rich's highlighter wraps interpolated values in style
+    spans and the asserted substrings stop being contiguous.
+
+    Asserts color_system rather than is_terminal on purpose: rendering
+    styles output from the colour system cached at construction, so
+    is_terminal can read False while ANSI is still being emitted.
+    """
+    assert history_cli.console.color_system is None
 
 
 def _seed(db_path, sent_name='sent.txt', failed_name='failed.txt'):
@@ -141,3 +194,191 @@ def test_reset_command_multiple_matches_without_yes_prompts_and_aborts(
 
     expected_pending = 2
     assert len(pending) == expected_pending
+
+
+def test_trust_host_pins_a_new_key(tmp_path):
+    """Test trust-host records the key for a never-seen endpoint."""
+    pins_path = tmp_path / 'known_hosts.json'
+    mock_transport = _mock_transport_with_key()
+    socket_patch, transport_patch = _patched_transport(mock_transport)
+
+    with socket_patch, transport_patch:
+        result = runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path), '-y'],
+        )
+
+    assert result.exit_code == 0
+    stored = get_pin('sftp.example.com', 22, pins_path)
+    assert stored.fingerprint == format_fingerprint(_SERVER_KEY_BLOB)
+
+
+def test_trust_host_never_authenticates(tmp_path):
+    """Test reading a host key never sends the password.
+
+    The whole point is to inspect an untrusted server safely, so the
+    command must stop at the key exchange.
+    """
+    pins_path = tmp_path / 'known_hosts.json'
+    mock_transport = _mock_transport_with_key()
+    socket_patch, transport_patch = _patched_transport(mock_transport)
+
+    with socket_patch, transport_patch:
+        runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path), '-y'],
+        )
+
+    mock_transport.auth_password.assert_not_called()
+    mock_transport.auth_publickey.assert_not_called()
+    mock_transport.connect.assert_not_called()
+
+
+def test_trust_host_shows_both_fingerprints_on_a_mismatch(tmp_path):
+    """Test a changed key is shown against the stored one before asking."""
+    pins_path = tmp_path / 'known_hosts.json'
+    save_pin(
+        'sftp.example.com',
+        22,
+        HostPin(
+            key_type=_SERVER_KEY_TYPE,
+            fingerprint='SHA256:the-stored-one',
+            pinned_at='2026-09-22T14:03:11',
+        ),
+        pins_path,
+    )
+    mock_transport = _mock_transport_with_key()
+    socket_patch, transport_patch = _patched_transport(mock_transport)
+
+    with socket_patch, transport_patch:
+        result = runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path)],
+            input='n\n',
+        )
+
+    assert 'SHA256:the-stored-one' in result.stdout
+    assert format_fingerprint(_SERVER_KEY_BLOB) in result.stdout
+    assert 'MISMATCH' in result.stdout
+
+
+def test_trust_host_declining_leaves_the_stored_pin(tmp_path):
+    """Test answering no keeps the previously trusted key."""
+    pins_path = tmp_path / 'known_hosts.json'
+    original = HostPin(
+        key_type=_SERVER_KEY_TYPE,
+        fingerprint='SHA256:the-stored-one',
+        pinned_at='2026-09-22T14:03:11',
+    )
+    save_pin('sftp.example.com', 22, original, pins_path)
+    socket_patch, transport_patch = _patched_transport(
+        _mock_transport_with_key(),
+    )
+
+    with socket_patch, transport_patch:
+        result = runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path)],
+            input='n\n',
+        )
+
+    assert result.exit_code == 0
+    assert get_pin('sftp.example.com', 22, pins_path) == original
+
+
+def test_trust_host_confirming_overwrites_the_stored_pin(tmp_path):
+    """Test answering yes re-pins the endpoint to the observed key."""
+    pins_path = tmp_path / 'known_hosts.json'
+    save_pin(
+        'sftp.example.com',
+        22,
+        HostPin(
+            key_type=_SERVER_KEY_TYPE,
+            fingerprint='SHA256:the-stored-one',
+            pinned_at='2026-09-22T14:03:11',
+        ),
+        pins_path,
+    )
+    socket_patch, transport_patch = _patched_transport(
+        _mock_transport_with_key(),
+    )
+
+    with socket_patch, transport_patch:
+        result = runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path)],
+            input='y\n',
+        )
+
+    assert result.exit_code == 0
+    stored = get_pin('sftp.example.com', 22, pins_path)
+    assert stored.fingerprint == format_fingerprint(_SERVER_KEY_BLOB)
+
+
+def test_trust_host_reports_an_already_trusted_key(tmp_path):
+    """Test a matching key needs no confirmation and changes nothing."""
+    pins_path = tmp_path / 'known_hosts.json'
+    socket_patch, transport_patch = _patched_transport(
+        _mock_transport_with_key(),
+    )
+    with socket_patch, transport_patch:
+        runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path), '-y'],
+        )
+    before = pins_path.read_text(encoding='utf-8')
+
+    socket_patch, transport_patch = _patched_transport(
+        _mock_transport_with_key(),
+    )
+    with socket_patch, transport_patch:
+        result = runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path)],
+        )
+
+    assert result.exit_code == 0
+    assert 'already trusted' in result.stdout.lower()
+    assert pins_path.read_text(encoding='utf-8') == before
+
+
+def test_trust_host_exits_nonzero_when_unreachable(tmp_path):
+    """Test an unreachable server is reported as a failure."""
+    pins_path = tmp_path / 'known_hosts.json'
+
+    with patch(
+        'sftp_file_transfer.history_cli.socket.create_connection',
+        side_effect=OSError('refused'),
+    ):
+        result = runner.invoke(
+            app,
+            ['trust-host', 'sftp.example.com', '--pins', str(pins_path), '-y'],
+        )
+
+    assert result.exit_code == 1
+    assert not pins_path.exists()
+
+
+def test_trust_host_uses_the_given_port(tmp_path):
+    """Test --port pins the endpoint under that port, not the default."""
+    pins_path = tmp_path / 'known_hosts.json'
+    socket_patch, transport_patch = _patched_transport(
+        _mock_transport_with_key(),
+    )
+
+    with socket_patch, transport_patch:
+        runner.invoke(
+            app,
+            [
+                'trust-host',
+                'sftp.example.com',
+                '--port',
+                '2222',
+                '--pins',
+                str(pins_path),
+                '-y',
+            ],
+        )
+
+    assert get_pin('sftp.example.com', 2222, pins_path) is not None
+    assert get_pin('sftp.example.com', 22, pins_path) is None

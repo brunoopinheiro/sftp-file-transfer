@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from sftp_file_transfer.components.history_tracker import HistoryTracker
+from sftp_file_transfer.components.host_pins import HostKeyMismatchError
 from sftp_file_transfer.monitor.daemon import (
     CYCLE_TIMEOUT_SECONDS,
     MAX_CLIENT_BUFFER_BYTES,
@@ -227,6 +228,44 @@ def test_probe_sftp_returns_false_on_connection_error(tmp_path, monkeypatch):
         side_effect=OSError('unreachable'),
     ):
         assert daemon._probe_sftp() is False
+
+    assert daemon.state.sftp_host_key_mismatch is False
+
+
+def test_probe_sftp_flags_a_host_key_mismatch(tmp_path, monkeypatch):
+    """Test an intercepted connection is recorded distinctly.
+
+    A mismatch and an unreachable host both leave sftp_connected False,
+    so without this flag the dashboard cannot tell them apart.
+    """
+    monkeypatch.setenv('SFTP_HOST', 'localhost')
+    monkeypatch.setenv('SFTP_PORT', '22')
+    monkeypatch.setenv('SFTP_USER', 'user')
+    monkeypatch.setenv('SFTP_PASSWORD', 'pw')
+    daemon = _make_daemon(tmp_path)
+
+    with patch(
+        'sftp_file_transfer.monitor.daemon.SFTPManager',
+        side_effect=HostKeyMismatchError('HOST KEY MISMATCH for host:22'),
+    ):
+        assert daemon._probe_sftp() is False
+
+    assert daemon.state.sftp_host_key_mismatch is True
+
+
+def test_probe_sftp_clears_a_stale_mismatch_flag(tmp_path, monkeypatch):
+    """Test the flag drops once the expected key is seen again."""
+    monkeypatch.setenv('SFTP_HOST', 'localhost')
+    monkeypatch.setenv('SFTP_PORT', '22')
+    monkeypatch.setenv('SFTP_USER', 'user')
+    monkeypatch.setenv('SFTP_PASSWORD', 'pw')
+    daemon = _make_daemon(tmp_path)
+    daemon.state.sftp_host_key_mismatch = True
+
+    with patch('sftp_file_transfer.monitor.daemon.SFTPManager'):
+        assert daemon._probe_sftp() is True
+
+    assert daemon.state.sftp_host_key_mismatch is False
 
 
 def test_probe_db_returns_none_when_not_configured(tmp_path, monkeypatch):

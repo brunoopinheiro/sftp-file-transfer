@@ -95,6 +95,8 @@ SFTP_USER=your_sftp_user
 SFTP_PASSWORD=your_sftp_password
 ```
 
+The SFTP server's identity is verified automatically — see [Host key verification](#host-key-verification). There is nothing to configure for it.
+
 ### Required for scheduled mode — send loop
 
 ```dotenv
@@ -130,6 +132,62 @@ NFCE_LOOKBACK_DAYS=5
 - `NFCE_LOOKBACK_DAYS`: optional, defaults to `5` — how many days back to look for pending invoices on each run.
 
 > If this program takes over invoking generation, disable any existing Windows Task Scheduler entry for the old generator script to avoid running it twice.
+
+## Host key verification
+
+The SFTP server's identity is pinned the **first** time it is contacted, and checked on every connection after that. If the key ever changes, the transfer is aborted *before* the password is sent, and no files go out until someone confirms the change.
+
+This is the same model `ssh` itself uses (trust on first use), and it needs no configuration.
+
+```
+first connection  -> record the server's key, connect, log a warning
+every connection  -> key must match the recorded one
+      after that     mismatch -> abort, password never sent
+```
+
+Pins live in `data/known_hosts.json`, next to the send-history ledger, keyed by `host:port`:
+
+```json
+{
+  "sftp.example.com:22": {
+    "key_type": "ssh-ed25519",
+    "fingerprint": "SHA256:s1B0B...",
+    "pinned_at": "2026-09-22T14:03:11"
+  }
+}
+```
+
+Override the location with `SFTP_HOST_PINS_PATH` if needed.
+
+### The first connection is the trust anchor
+
+Trust on first use can only protect connections *after* the first one. If a site were already being intercepted at the moment it first ran, the interceptor's key is what gets recorded. For a new install on an untrusted network, run `sftp_history trust-host <host>` once from a network you trust and check the fingerprint it prints — or copy an existing site's `known_hosts.json` entry, if the sites share an SFTP server. The fingerprint is printed in the same `SHA256:` format as `ssh-keygen -lf`, so it can be compared against any other tool.
+
+### When the host key changes
+
+A legitimate change — the server was rebuilt, or its key rotated — shows up as a failed send and this log line:
+
+```
+ERROR  HOST KEY MISMATCH for sftp.example.com:22: expected ssh-ed25519
+       SHA256:hK9x2...mQ4, got ssh-ed25519 SHA256:pL7w1...zT8
+```
+
+In `sftp_monitor` the dashboard shows `⚠ HOST KEY MISMATCH` rather than a plain disconnection, so it can be told apart from the site's network being down.
+
+To accept the new key:
+
+```powershell
+sftp-file-transfer-history.exe trust-host sftp.example.com
+```
+
+It shows the stored and observed fingerprints side by side and asks before replacing the stored one. It reads the key **without authenticating**, so no password is sent to a server that hasn't been confirmed yet. `--port` targets a non-default port, and `--yes` skips the prompt for scripted use. It is also option `5` in the interactive `sftp_history` menu.
+
+> If the change was not expected, do not confirm it. A mismatch on an untrusted network can mean the connection is being intercepted.
+
+### Caveats
+
+- `poetry run task clean` deletes `data/`, which removes the pin file along with the send-history ledger. The next run re-pins whatever answers — so avoid running it on a site while on an untrusted network.
+- Pins are keyed by the `SFTP_HOST` string. Switching between a hostname and an IP address for the same server reads as a new endpoint and re-pins silently.
 
 ## Running from source (Poetry)
 
@@ -167,6 +225,7 @@ poetry run sftp_history reset <hash-or-path-substring>
 - `failures [--db PATH]` — list only records that haven't been sent successfully yet.
 - `report [--db PATH]` — summary counts (total, sent, pending/failed, date range, last sent date).
 - `reset <hash-or-path-substring> [--yes] [--db PATH]` — requeue a record for resend.
+- `trust-host <host> [--port N] [--yes] [--pins PATH]` — trust (or re-trust) the SFTP server's host key after a legitimate key change. See [Host key verification](#host-key-verification).
 - Running `sftp_history` with no subcommand launches an interactive menu.
 
 ## Building the `.exe` files
@@ -228,3 +287,4 @@ If only the send leg is needed on a given site (generation handled elsewhere, or
 - Application logs are written to a rotating log file (see `sftp_file_transfer/components/logger_setup.py`) — check this first if generation or sends aren't behaving as expected.
 - Use `sftp_history report` for a quick health check, and `sftp_history failures` to see exactly which files are stuck and why (`last_error` column).
 - Use `sftp_history reset <hash-or-path>` to force a specific file to be resent on the next cycle.
+- `HOST KEY MISMATCH` in the log (or on the monitor dashboard) means sends are halted because the SFTP server presented a different host key than the one recorded. See [Host key verification](#host-key-verification) — do not re-trust it unless the change was expected.

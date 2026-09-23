@@ -12,6 +12,7 @@ from sftp_file_transfer.components.history_tracker import (
     HistoryTracker,
     resolve_history_db_path,
 )
+from sftp_file_transfer.components.host_pins import HostKeyMismatchError
 from sftp_file_transfer.components.logger_setup import setup_logger
 from sftp_file_transfer.components.nfce_config import NfceConfig
 from sftp_file_transfer.components.nfce_db_client import build_engine
@@ -237,9 +238,13 @@ class MonitorDaemon:
         self.state.sftp_connected = self._probe_sftp()
         self.state.db_connected = self._probe_db()
 
-    @staticmethod
-    def _probe_sftp() -> bool:
+    def _probe_sftp(self) -> bool:
         """Attempt a real SFTP connection using the configured env vars.
+
+        A refused host key is recorded separately from an ordinary
+        failure: both leave the target unreachable, but only one of
+        them means the connection is being intercepted, and the
+        dashboard has to be able to say which.
 
         Returns:
             bool: True if the connection succeeded, else False.
@@ -255,9 +260,15 @@ class MonitorDaemon:
                 'key_password': None,
             }
             with SFTPManager(config):
+                self.state.sftp_host_key_mismatch = False
                 return True
+        except HostKeyMismatchError as e:
+            logger.error(f'SFTP connectivity probe refused the host key: {e}')
+            self.state.sftp_host_key_mismatch = True
+            return False
         except Exception as e:
             logger.error(f'SFTP connectivity probe failed: {e}')
+            self.state.sftp_host_key_mismatch = False
             return False
 
     @staticmethod

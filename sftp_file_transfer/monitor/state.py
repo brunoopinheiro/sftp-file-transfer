@@ -51,6 +51,9 @@ class DashboardState:
         db_connected: Whether the NFCe source database is reachable, or
             None if this site isn't configured for DB-based generation.
         sftp_connected: Whether the SFTP target is reachable.
+        sftp_host_key_mismatch: Whether the last SFTP attempt was
+            refused because the server's host key did not match the
+            stored pin, as opposed to the target merely being down.
         uptime_sec: Seconds elapsed since the daemon process started.
         sent_count: Total files successfully sent.
         failed_count: Total files currently failed.
@@ -66,6 +69,7 @@ class DashboardState:
     countdown_sec: int = 0
     db_connected: Optional[bool] = None
     sftp_connected: bool = False
+    sftp_host_key_mismatch: bool = False
     uptime_sec: int = 0
     sent_count: int = 0
     failed_count: int = 0

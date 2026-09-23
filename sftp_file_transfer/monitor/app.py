@@ -191,7 +191,7 @@ class DashboardScreen(Screen):
                 ),
                 self._status_row(
                     'SFTP CONNECTION',
-                    self._connection_label(state.sftp_connected),
+                    self._sftp_connection_label(state),
                     style=self._connection_style(
                         state.sftp_connected,
                         theme,
@@ -334,6 +334,24 @@ class DashboardScreen(Screen):
         if connected is None:
             return 'N/A'
         return '● CONNECTED' if connected else '○ DISCONNECTED'
+
+    @staticmethod
+    def _sftp_connection_label(state: DashboardState) -> str:
+        """Render the SFTP connection flag, calling out a refused key.
+
+        A host key mismatch and an unreachable server both leave the
+        connection down, but only one of them means someone may be
+        intercepting it, so they must not read the same on screen.
+
+        Args:
+            state: The dashboard state being rendered.
+
+        Returns:
+            str: The SFTP connection label.
+        """
+        if state.sftp_host_key_mismatch:
+            return '⚠ HOST KEY MISMATCH'
+        return DashboardScreen._connection_label(state.sftp_connected)
 
     def action_force_run(self) -> None:
         """Ask the app to send a force-run command to the daemon.
