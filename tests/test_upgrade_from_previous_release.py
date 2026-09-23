@@ -1,10 +1,18 @@
-"""Regression tests for upgrading a deployed site from 1.0 to 1.1.
+"""Regression tests for upgrading a deployed site from an earlier release.
 
-Deployment replaces only the executable: `data\\send_history.db` and
-`logs\\` are inherited untouched. These tests therefore run the current
-code against state shaped exactly as a previous release left it.
+Deployment replaces only the executable: `data\\send_history.db`,
+`data\\known_hosts.json` and `logs\\` are inherited untouched. These
+tests therefore run the current code against state shaped exactly as a
+previous release left it.
 
-The baseline is checked in as code rather than as a binary fixture.
+Baselines are named after the shape they froze rather than the release
+that produced it -- the ledger's `pre-orm`/`orm` schema eras, the log
+layout, the host key pin format -- because what breaks an upgrade is a
+change of shape, and a given shape usually spans several releases.
+Adding a new one is how a future release records what it must stay
+compatible with.
+
+The baselines are checked in as code rather than as binary fixtures.
 `.gitignore` ignores `data/`, `*.log` and `.env`, so the obvious fixture
 paths could not be tracked at all; and more importantly, a committed
 `.db` would be regenerated from current code the first time a drift test
@@ -13,8 +21,10 @@ behind an unreadable diff.
 """
 
 import hashlib
+import json
 import sqlite3
 import uuid
+from dataclasses import fields
 from datetime import date
 from pathlib import Path
 
@@ -26,6 +36,12 @@ from sftp_file_transfer.components.history_tracker import (
     SendHistory,
     resolve_history_db_path,
 )
+from sftp_file_transfer.components.host_pins import (
+    HostKeyMismatchError,
+    HostPin,
+    get_pin,
+    verify_or_pin,
+)
 from sftp_file_transfer.components.logger_setup import (
     BACKUP_COUNT,
     MAX_LOG_SIZE,
@@ -34,7 +50,7 @@ from sftp_file_transfer.components.logger_setup import (
 from sftp_file_transfer.scheduled import select_files_to_send
 
 # --------------------------------------------------------------------
-# The frozen v1.0 baseline.
+# The frozen ledger baselines.
 # --------------------------------------------------------------------
 
 # Verbatim DDL from the pre-ORM tracker. Retrieve with:
@@ -147,9 +163,9 @@ _LEGACY_ATTEMPTS_BEFORE = 3
 _LEGACY_ATTEMPTS_AFTER = 4
 
 # --------------------------------------------------------------------
-# Log baseline. v1.0 used 10 MB x 5 backups (and 5 MB x 5 before that);
-# both produce the same file set, and 1.1's 1 MB threshold sits below
-# either, so one shape covers them.
+# Log baseline. Earlier releases used 10 MB x 5 backups (and 5 MB x 5
+# before that); both produce the same file set, and the current 1 MB
+# threshold sits below either, so one shape covers them.
 # --------------------------------------------------------------------
 
 _LEGACY_BACKUPS = 5
@@ -160,9 +176,31 @@ _SMALL_LOG_BYTES = 512
 _TINY_MAX_BYTES = 256
 _ROLLOVER_RECORDS = 200
 
+# --------------------------------------------------------------------
+# The frozen host key pin baseline.
+# --------------------------------------------------------------------
+
+# Verbatim known_hosts.json as the release that introduced host key
+# verification wrote it. Deliberately NOT produced by save_pin(), for
+# the same reason the ledger DDL is not produced by create_all(): a
+# baseline generated from current code adopts any format change
+# silently, and the drift it exists to catch would pass unnoticed.
+_LEGACY_PIN_HOST = 'sftp.hotel.example'
+_LEGACY_PIN_PORT = 22
+_LEGACY_PIN_KEY_TYPE = 'ssh-ed25519'
+_LEGACY_PIN_FINGERPRINT = 'SHA256:0h2DQOSyM4vT7bWDkkYNC0ux1lCgRSWlrGsHpvmiSMU'
+_LEGACY_KNOWN_HOSTS = """{
+  "sftp.hotel.example:22": {
+    "fingerprint": "SHA256:0h2DQOSyM4vT7bWDkkYNC0ux1lCgRSWlrGsHpvmiSMU",
+    "key_type": "ssh-ed25519",
+    "pinned_at": "2026-09-22T14:03:11"
+  }
+}
+"""
+
 
 def _legacy_hash(local_path: str) -> str:
-    """Hash a frozen v1.0 path exactly as v1.0 stored it.
+    """Hash a frozen path exactly as an earlier release stored it.
 
     Deliberately not HistoryTracker.hash_path(): that resolves the path
     first, and resolution is environment-dependent (on Windows it also
@@ -180,7 +218,7 @@ def _legacy_hash(local_path: str) -> str:
 
 
 def _frozen_seed_rows() -> list:
-    """Build the insertable form of the frozen v1.0 rows."""
+    """Build the insertable form of the frozen legacy rows."""
     return [
         (
             _legacy_hash(local_path),
@@ -313,13 +351,33 @@ def _write_log_file(path: Path, marker: str, size_bytes: int = 0) -> None:
 
 
 def _seed_legacy_logs(log_dir: Path, name: str, active_bytes: int) -> None:
-    """Create an inherited log plus the five backups v1.0 kept."""
+    """Create an inherited log plus the five backups earlier releases kept."""
     _write_log_file(log_dir / f'{name}.log', _ACTIVE_MARKER, active_bytes)
     for index in range(1, _LEGACY_BACKUPS + 1):
         _write_log_file(
             log_dir / f'{name}.log.{index}',
             _BACKUP_MARKER.format(index=index),
         )
+
+
+def _build_legacy_pin_file(pins_path: Path) -> Path:
+    """Materialise a pin file exactly as an earlier release wrote it.
+
+    Args:
+        pins_path: Where to create the known_hosts.json file.
+
+    Returns:
+        Path: The path the pin file was created at.
+    """
+    pins_path.parent.mkdir(parents=True, exist_ok=True)
+    pins_path.write_text(_LEGACY_KNOWN_HOSTS, encoding='utf-8')
+    return pins_path
+
+
+def _first_pin_entry(pins_path: Path) -> dict:
+    """Read the single stored entry out of a pin file."""
+    stored = json.loads(pins_path.read_text(encoding='utf-8'))
+    return next(iter(stored.values()))
 
 
 @pytest.fixture
@@ -406,7 +464,7 @@ def test_a_legacy_ledger_carries_no_migration_marker(tmp_path, ddl):
 
 @pytest.mark.parametrize('ddl', _LEGACY_DDLS.values(), ids=_LEGACY_DDLS)
 def test_legacy_ledger_is_opened_in_place_not_recreated(tmp_path, ddl):
-    """Test that 1.1 adopts the inherited ledger instead of replacing it.
+    """Test that the ledger is adopted in place, not replaced.
 
     If the ledger were recreated, every file a site already delivered
     would be sent again.
@@ -425,7 +483,7 @@ def test_legacy_ledger_is_opened_in_place_not_recreated(tmp_path, ddl):
 
 @pytest.mark.parametrize('ddl', _LEGACY_DDLS.values(), ids=_LEGACY_DDLS)
 def test_legacy_rows_are_readable_through_the_current_orm(tmp_path, ddl):
-    """Test that every inherited row round-trips through 1.1's ORM.
+    """Test that every inherited row round-trips through the current ORM.
 
     The semantic half of the drift guard: it exercises the columns the
     ORM actually selects, including the nullable ones a column-name
@@ -500,7 +558,7 @@ def test_every_orm_index_exists_in_the_legacy_table(tmp_path, ddl):
 
 @pytest.mark.parametrize('ddl', _LEGACY_DDLS.values(), ids=_LEGACY_DDLS)
 def test_new_attempts_write_into_the_legacy_table(tmp_path, ddl):
-    """Test that 1.1 can insert into and update a 1.0-created table.
+    """Test that the current code writes into an inherited table.
 
     Exercises the ORM's Python-side defaults against the legacy table's
     NOT NULL columns.
@@ -664,7 +722,7 @@ def test_running_from_another_directory_starts_an_empty_ledger(
     tmp_path,
     monkeypatch,
 ):
-    """Test the documented behaviour when 1.1 runs with a different CWD.
+    """Test the documented behaviour when run with a different CWD.
 
     Every persistent path is relative, and nothing anchors them to the
     executable — which is why run_uploader.bat does `cd /d "C:\\SFTP"`.
@@ -712,7 +770,7 @@ def test_inherited_oversized_log_is_appended_not_truncated(
     tmp_path,
     upgrade_logger,
 ):
-    """Test that an inherited log survives 1.1 opening it.
+    """Test that an inherited log survives being opened.
 
     Asserted before any record is emitted: the handler opens in append
     mode, but the first emit rotates, so checking afterwards would be
@@ -736,12 +794,12 @@ def test_first_record_after_upgrade_shifts_legacy_backups(
     tmp_path,
     upgrade_logger,
 ):
-    """Test that 1.0's backups shift down rather than being lost.
+    """Test that inherited backups shift down rather than being lost.
 
-    1.1 lowers the rotation threshold to 1 MB, so an inherited log
-    rotates on the very first record. If that rollover discarded the
-    inherited backups it would destroy the forensic record of whatever
-    prompted the upgrade.
+    The current 1 MB rotation threshold is below what earlier releases
+    used, so an inherited log rotates on the very first record. If that
+    rollover discarded the inherited backups it would destroy the
+    forensic record of whatever prompted the upgrade.
     """
     log_dir = tmp_path / 'logs'
     name = str(uuid.uuid4())
@@ -765,7 +823,7 @@ def test_first_record_after_upgrade_shifts_legacy_backups(
 
 
 def test_retention_settles_at_the_new_backup_count(tmp_path, upgrade_logger):
-    """Test that retention converges on 1.1's cap after the upgrade.
+    """Test that retention converges on the current cap after upgrade.
 
     Driven with a small max_bytes: rotating 60 times at the real 1 MB
     threshold would write ~60 MB per run and prove nothing extra, since
@@ -804,3 +862,83 @@ def test_small_inherited_log_is_left_alone(tmp_path, upgrade_logger):
         assert _BACKUP_MARKER.format(index=index) in backup.read_text(
             encoding='utf-8',
         )
+
+
+# --------------------------------------------------------------------
+# F. Host key pins
+# --------------------------------------------------------------------
+
+
+def test_an_inherited_pin_file_is_read_not_reset(tmp_path):
+    """Test a pin written by an earlier release is still honoured.
+
+    If an upgrade could not read the inherited file it would fall back
+    to trust-on-first-use and re-trust whatever answered the socket,
+    which is precisely what pinning exists to prevent.
+    """
+    pins_path = _build_legacy_pin_file(tmp_path / 'data' / 'known_hosts.json')
+
+    stored = get_pin(_LEGACY_PIN_HOST, _LEGACY_PIN_PORT, pins_path)
+
+    assert stored is not None
+    assert stored.key_type == _LEGACY_PIN_KEY_TYPE
+    assert stored.fingerprint == _LEGACY_PIN_FINGERPRINT
+
+
+def test_every_pin_field_exists_in_an_inherited_pin_file(tmp_path):
+    """Test no HostPin field is missing from an inherited pin file.
+
+    The structural drift guard, mirroring the ORM-column check: a field
+    added to HostPin without a fallback would raise on a deployed site
+    the first time its inherited file was read, while CI stayed green
+    against one this code had just written itself.
+    """
+    pins_path = _build_legacy_pin_file(tmp_path / 'known_hosts.json')
+
+    entry = _first_pin_entry(pins_path)
+    pin_fields = {field.name for field in fields(HostPin)}
+
+    assert pin_fields <= set(entry), (
+        f'HostPin fields missing from an inherited pin file: '
+        f'{sorted(pin_fields - set(entry))}. Reading one would fail on a '
+        f'deployed site, or silently lose the field.'
+    )
+
+
+def test_an_inherited_pin_still_refuses_a_changed_key(tmp_path):
+    """Test the inherited trust anchor still halts an unexpected key.
+
+    The pin file is worthless if an upgrade keeps reading it but stops
+    enforcing it.
+    """
+    pins_path = _build_legacy_pin_file(tmp_path / 'known_hosts.json')
+
+    with pytest.raises(HostKeyMismatchError):
+        verify_or_pin(
+            _LEGACY_PIN_HOST,
+            _LEGACY_PIN_PORT,
+            _LEGACY_PIN_KEY_TYPE,
+            'SHA256:a-key-this-site-has-never-seen',
+            pins_path,
+        )
+
+
+def test_an_inherited_pin_is_not_rewritten_when_it_matches(tmp_path):
+    """Test a matching key leaves the inherited file byte-identical.
+
+    Rewriting on every connect would churn the file and discard the
+    original pinned_at, the only record of when trust was established.
+    """
+    pins_path = _build_legacy_pin_file(tmp_path / 'known_hosts.json')
+    before = pins_path.read_text(encoding='utf-8')
+
+    newly_pinned = verify_or_pin(
+        _LEGACY_PIN_HOST,
+        _LEGACY_PIN_PORT,
+        _LEGACY_PIN_KEY_TYPE,
+        _LEGACY_PIN_FINGERPRINT,
+        pins_path,
+    )
+
+    assert newly_pinned is False
+    assert pins_path.read_text(encoding='utf-8') == before
