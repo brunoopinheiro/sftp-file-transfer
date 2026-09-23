@@ -48,10 +48,6 @@ pyinstaller = "^6.14.2"
 aioclock = "^0.3.0"
 tzdata = "^2025.2"
 
-[tool.pytest]
-log_cli = true
-log_cli_level = "INFO"
-
 [tool.pytest.ini_options]
 addopts = "-vv --cov=sftp_file_transfer --cov-report=term-missing -p no:warnings"
 testpaths = [
