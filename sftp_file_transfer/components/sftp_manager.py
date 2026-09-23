@@ -22,6 +22,14 @@ from tenacity import (
     wait_exponential,
 )
 
+from sftp_file_transfer.components.host_pins import (
+    HostKeyMismatchError,
+    format_fingerprint,
+    get_pin,
+    preferred_key_algorithms,
+    resolve_host_pins_path,
+    verify_or_pin,
+)
 from sftp_file_transfer.components.logger_setup import setup_logger
 
 logger: Logger = setup_logger()
@@ -105,6 +113,7 @@ class SFTPManager:
     def __init__(
         self,
         target: SFTPManagerConfig,
+        pins_path: Optional[Path] = None,
     ):
         self.check_args(
             sftp_host=target['sftp_host'],
@@ -118,6 +127,7 @@ class SFTPManager:
         self.password = target['sftp_password']
         self.key_filepath = target['key_filepath']
         self.key_password = target['key_password']
+        self._pins_path = pins_path or resolve_host_pins_path()
         self._transport: Optional[Transport] = None
         self._sftp: Optional[SFTPClient] = None
 
@@ -154,40 +164,100 @@ class SFTPManager:
         self.close()
 
     def _connect(self) -> None:
-        """Establish an SFTP connection.
+        """Establish a host-key-verified SFTP connection.
 
         Opens a Transport over a socket with a bounded connect timeout,
-        authenticates either via RSA private key (if key_filepath is
-        set) or via username/password, then builds the SFTP client
-        (self._sftp) from the transport. Keepalives and a channel
-        timeout are enabled so a connection that dies silently is
-        detected instead of blocking a transfer forever.
+        completes the key exchange, and checks the server's host key
+        against the trust-on-first-use pin store *before* sending any
+        credentials. Then authenticates either via RSA private key (if
+        key_filepath is set) or via username/password, and builds the
+        SFTP client (self._sftp) from the transport. Keepalives and a
+        channel timeout are enabled so a connection that dies silently
+        is detected instead of blocking a transfer forever.
+
+        This deliberately replaces Transport.connect(), which is a
+        shortcut for start_client + auth and so would send the password
+        before anything about the server had been checked. connect()
+        calls start_client() itself, so the two must never be combined.
 
         Raises:
             SSHException: If the TCP connection cannot be established.
+            HostKeyMismatchError: If the server's host key differs from
+                the stored pin. No credentials are sent in that case.
+            HostPinStoreError: If the pin file exists but is unusable.
 
         Returns:
             None.
         """
+        pin = get_pin(self.host, self.port, self._pins_path)
         self._transport = Transport(self._open_socket())
-        if self.key_filepath:
-            private_key = RSAKey.from_private_key_file(
-                self.key_filepath,
-                password=self.key_password,
-            )
-            self._transport.connect(
-                username=self.user,
-                pkey=private_key,
-            )
-        else:
-            self._transport.connect(
-                username=self.user,
-                password=self.password,
-            )
+        try:
+            if pin is not None:
+                # Ask only for the family we pinned, so a server that
+                # offers several host keys can't hand us a different
+                # one and read as a mismatch -- and so an attacker
+                # can't downgrade to a type we hold no pin for.
+                options = self._transport.get_security_options()
+                options.key_types = preferred_key_algorithms(pin.key_type)
+
+            # No timeout argument: start_client's wait loop can break on
+            # expiry *without* raising, leaving negotiation incomplete.
+            # banner_timeout/handshake_timeout already bound the
+            # handshake, and Transport.connect passes none either.
+            self._transport.start_client()
+            self._verify_host_key()
+
+            if self.key_filepath:
+                private_key = RSAKey.from_private_key_file(
+                    self.key_filepath,
+                    password=self.key_password,
+                )
+                self._transport.auth_publickey(self.user, private_key)
+            else:
+                self._transport.auth_password(self.user, self.password)
+        except Exception:
+            self.close()
+            raise
 
         self._transport.set_keepalive(KEEPALIVE_INTERVAL_SECONDS)
         self._sftp = SFTPClient.from_transport(self._transport)
         self._apply_channel_timeout()
+
+    def _verify_host_key(self) -> None:
+        """Check the negotiated host key against the pin store.
+
+        Raises:
+            HostKeyMismatchError: If the key differs from the stored pin.
+
+        Returns:
+            None.
+        """
+        key = self._transport.get_remote_server_key()
+        key_type = key.get_name()
+        fingerprint = format_fingerprint(key.asbytes())
+        try:
+            newly_pinned = verify_or_pin(
+                self.host,
+                self.port,
+                key_type,
+                fingerprint,
+                self._pins_path,
+            )
+        except HostKeyMismatchError as exc:
+            logger.error(str(exc))
+            raise
+
+        if newly_pinned:
+            logger.warning(
+                f'Trusting the SFTP host key for {self.host}:{self.port} on '
+                f'first use ({key_type} {fingerprint}). Recorded in '
+                f'{self._pins_path}; later connections must match it.',
+            )
+        else:
+            logger.info(
+                f'SFTP host key verified for {self.host}:{self.port} '
+                f'({key_type} {fingerprint}).',
+            )
 
     def _open_socket(self) -> socket.socket:
         """Open a TCP socket to the target with a bounded connect timeout.

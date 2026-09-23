@@ -6,12 +6,35 @@ from hypothesis import given
 from hypothesis import strategies as st
 from paramiko import SSHException
 
+from sftp_file_transfer.components.host_pins import (
+    HostKeyMismatchError,
+    HostPin,
+    HostPinStoreError,
+    format_fingerprint,
+    get_pin,
+    save_pin,
+)
 from sftp_file_transfer.components.sftp_manager import (
     CHANNEL_TIMEOUT_SECONDS,
     CONNECT_TIMEOUT_SECONDS,
     KEEPALIVE_INTERVAL_SECONDS,
     SFTPManager,
 )
+
+_SERVER_KEY_BLOB = b'\x00\x00\x00\x0bssh-ed25519-fake-blob'
+_SERVER_KEY_TYPE = 'ssh-ed25519'
+
+
+def _mock_transport_with_key(
+    blob: bytes = _SERVER_KEY_BLOB,
+    key_type: str = _SERVER_KEY_TYPE,
+) -> MagicMock:
+    """Build a mock Transport that presents a fixed host key."""
+    mock_transport = MagicMock()
+    server_key = mock_transport.get_remote_server_key.return_value
+    server_key.asbytes.return_value = blob
+    server_key.get_name.return_value = key_type
+    return mock_transport
 
 
 def test_sftp_connection(sftp_fixture):
@@ -354,7 +377,7 @@ def test_connect_uses_key_based_auth_when_key_filepath_set(tmp_path):
     }
 
     mock_key = MagicMock()
-    mock_transport = MagicMock()
+    mock_transport = _mock_transport_with_key()
     mock_sftp = MagicMock()
 
     mock_socket = MagicMock()
@@ -384,10 +407,11 @@ def test_connect_uses_key_based_auth_when_key_filepath_set(tmp_path):
             key_filepath, password=key_password
         )
         mock_transport_class.assert_called_once_with(mock_socket)
-        mock_transport.connect.assert_called_once_with(
-            username='testuser',
-            pkey=mock_key,
+        mock_transport.auth_publickey.assert_called_once_with(
+            'testuser',
+            mock_key,
         )
+        mock_transport.connect.assert_not_called()
         mock_from_transport.assert_called_once_with(mock_transport)
         assert sftp_manager._sftp == mock_sftp
         assert sftp_manager._transport == mock_transport
@@ -447,7 +471,10 @@ def test_connect_bounds_the_tcp_connect_attempt():
             'sftp_file_transfer.components.sftp_manager.socket.create_connection',
             return_value=MagicMock(),
         ) as mock_create_connection,
-        patch('sftp_file_transfer.components.sftp_manager.Transport'),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.Transport',
+            return_value=_mock_transport_with_key(),
+        ),
         patch(
             'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
             return_value=MagicMock(),
@@ -463,7 +490,7 @@ def test_connect_bounds_the_tcp_connect_attempt():
 
 def test_connect_enables_keepalive_so_a_dead_peer_is_detected():
     """Test that keepalives are turned on for the transport."""
-    mock_transport = MagicMock()
+    mock_transport = _mock_transport_with_key()
 
     with (
         patch(
@@ -495,7 +522,10 @@ def test_connect_bounds_how_long_a_request_may_stall():
             'sftp_file_transfer.components.sftp_manager.socket.create_connection',
             return_value=MagicMock(),
         ),
-        patch('sftp_file_transfer.components.sftp_manager.Transport'),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.Transport',
+            return_value=_mock_transport_with_key(),
+        ),
         patch(
             'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
             return_value=mock_sftp,
@@ -535,3 +565,250 @@ def test_live_connection_has_keepalive_and_channel_timeout(sftp_fixture):
             sftp_manager._transport.packetizer._Packetizer__keepalive_interval
             == KEEPALIVE_INTERVAL_SECONDS
         )
+
+
+def _pins_config() -> dict:
+    """Build a minimal password-auth config for host key tests."""
+    return {
+        'sftp_host': 'sftp.example.com',
+        'sftp_port': 22,
+        'sftp_user': 'testuser',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+
+
+def _connect_with(mock_transport, config=None, pins_path=None):
+    """Run _connect against a mocked paramiko Transport."""
+    with (
+        patch(
+            'sftp_file_transfer.components.sftp_manager.socket.create_connection',
+            return_value=MagicMock(),
+        ),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.Transport',
+            return_value=mock_transport,
+        ),
+        patch(
+            'sftp_file_transfer.components.sftp_manager.SFTPClient.from_transport',
+            return_value=MagicMock(),
+        ),
+    ):
+        manager = SFTPManager(config or _pins_config(), pins_path=pins_path)
+        manager._connect()
+        return manager
+
+
+def test_connect_reads_the_host_key_before_authenticating(tmp_path):
+    """Test the server key is inspected before any credential is sent.
+
+    This is the whole point of the change: paramiko's Transport.connect
+    authenticates as part of the same call, so the password would reach
+    an impostor before anything about it was checked.
+    """
+    mock_transport = _mock_transport_with_key()
+
+    _connect_with(mock_transport, pins_path=tmp_path / 'pins.json')
+
+    called = [call[0] for call in mock_transport.method_calls]
+    assert called.index('get_remote_server_key') < called.index(
+        'auth_password',
+    )
+
+
+def test_connect_never_calls_transport_connect(tmp_path):
+    """Test connect() is replaced, not supplemented.
+
+    Transport.connect calls start_client itself, so calling both would
+    restart an already-started thread.
+    """
+    mock_transport = _mock_transport_with_key()
+
+    _connect_with(mock_transport, pins_path=tmp_path / 'pins.json')
+
+    mock_transport.connect.assert_not_called()
+    mock_transport.start_client.assert_called_once_with()
+
+
+def test_connect_pins_the_host_key_on_first_use(tmp_path):
+    """Test an unknown server's key is recorded on the first connection."""
+    pins_path = tmp_path / 'pins.json'
+
+    _connect_with(_mock_transport_with_key(), pins_path=pins_path)
+
+    stored = get_pin('sftp.example.com', 22, pins_path)
+    assert stored.fingerprint == format_fingerprint(_SERVER_KEY_BLOB)
+    assert stored.key_type == _SERVER_KEY_TYPE
+
+
+def test_connect_accepts_a_matching_pin(tmp_path):
+    """Test a second connection to the same key authenticates normally."""
+    pins_path = tmp_path / 'pins.json'
+    _connect_with(_mock_transport_with_key(), pins_path=pins_path)
+
+    mock_transport = _mock_transport_with_key()
+    _connect_with(mock_transport, pins_path=pins_path)
+
+    mock_transport.auth_password.assert_called_once_with('testuser', 'pw')
+
+
+def test_connect_does_not_send_the_password_on_a_mismatch(tmp_path):
+    """Test a changed host key aborts before authentication."""
+    pins_path = tmp_path / 'pins.json'
+    save_pin(
+        'sftp.example.com',
+        22,
+        HostPin(
+            key_type=_SERVER_KEY_TYPE,
+            fingerprint='SHA256:something-else',
+            pinned_at='2026-09-22T14:03:11',
+        ),
+        pins_path,
+    )
+    mock_transport = _mock_transport_with_key()
+
+    with pytest.raises(HostKeyMismatchError):
+        _connect_with(mock_transport, pins_path=pins_path)
+
+    mock_transport.auth_password.assert_not_called()
+    mock_transport.auth_publickey.assert_not_called()
+
+
+def test_connect_closes_the_transport_on_a_mismatch(tmp_path):
+    """Test a rejected connection doesn't leak a half-open transport."""
+    pins_path = tmp_path / 'pins.json'
+    save_pin(
+        'sftp.example.com',
+        22,
+        HostPin(
+            key_type=_SERVER_KEY_TYPE,
+            fingerprint='SHA256:something-else',
+            pinned_at='2026-09-22T14:03:11',
+        ),
+        pins_path,
+    )
+    mock_transport = _mock_transport_with_key()
+
+    with pytest.raises(HostKeyMismatchError):
+        _connect_with(mock_transport, pins_path=pins_path)
+
+    mock_transport.close.assert_called_once()
+
+
+def test_connect_does_not_send_the_password_on_a_key_type_mismatch(tmp_path):
+    """Test a key of an unexpected type is rejected before auth."""
+    pins_path = tmp_path / 'pins.json'
+    _connect_with(_mock_transport_with_key(), pins_path=pins_path)
+
+    mock_transport = _mock_transport_with_key(key_type='ssh-rsa')
+    with pytest.raises(HostKeyMismatchError):
+        _connect_with(mock_transport, pins_path=pins_path)
+
+    mock_transport.auth_password.assert_not_called()
+
+
+def test_connect_constrains_key_types_when_a_pin_exists(tmp_path):
+    """Test a pinned endpoint only offers the pinned key algorithms.
+
+    Set before start_client, or paramiko has already negotiated.
+    """
+    pins_path = tmp_path / 'pins.json'
+    _connect_with(_mock_transport_with_key(), pins_path=pins_path)
+
+    mock_transport = _mock_transport_with_key()
+    _connect_with(mock_transport, pins_path=pins_path)
+
+    options = mock_transport.get_security_options.return_value
+    assert options.key_types == (_SERVER_KEY_TYPE,)
+    called = [call[0] for call in mock_transport.method_calls]
+    assert called.index('get_security_options') < called.index('start_client')
+
+
+def test_connect_does_not_constrain_key_types_on_first_use(tmp_path):
+    """Test an unpinned endpoint leaves paramiko's defaults alone."""
+    mock_transport = _mock_transport_with_key()
+
+    _connect_with(mock_transport, pins_path=tmp_path / 'pins.json')
+
+    mock_transport.get_security_options.assert_not_called()
+
+
+def test_connect_fails_closed_on_a_corrupt_pin_store(tmp_path):
+    """Test an unusable pin file stops the connection before the network."""
+    pins_path = tmp_path / 'pins.json'
+    pins_path.write_text('not valid json', encoding='utf-8')
+    mock_transport = _mock_transport_with_key()
+
+    with pytest.raises(HostPinStoreError):
+        _connect_with(mock_transport, pins_path=pins_path)
+
+    mock_transport.start_client.assert_not_called()
+    mock_transport.auth_password.assert_not_called()
+
+
+def test_live_connection_pins_and_then_reuses_the_server_key(
+    sftp_fixture,
+    tmp_path,
+):
+    """Test TOFU works against a real SSH handshake, not just mocks."""
+    pins_path = tmp_path / 'known_hosts.json'
+    config = {
+        'sftp_host': sftp_fixture.host,
+        'sftp_port': sftp_fixture.port,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+
+    with SFTPManager(config, pins_path=pins_path):
+        pass
+
+    pinned = get_pin(sftp_fixture.host, sftp_fixture.port, pins_path)
+    assert pinned is not None
+    assert pinned.fingerprint.startswith('SHA256:')
+
+    with SFTPManager(config, pins_path=pins_path):
+        pass
+
+    assert get_pin(sftp_fixture.host, sftp_fixture.port, pins_path) == pinned
+
+
+def test_live_connection_refuses_a_key_that_does_not_match_the_pin(
+    sftp_fixture,
+    tmp_path,
+):
+    """Test a real connection aborts when the stored key doesn't match."""
+    pins_path = tmp_path / 'known_hosts.json'
+    save_pin(
+        sftp_fixture.host,
+        sftp_fixture.port,
+        HostPin(
+            key_type='ssh-rsa',
+            fingerprint='SHA256:not-the-servers-key',
+            pinned_at='2026-09-22T14:03:11',
+        ),
+        pins_path,
+    )
+    config = {
+        'sftp_host': sftp_fixture.host,
+        'sftp_port': sftp_fixture.port,
+        'sftp_user': 'user',
+        'sftp_password': 'pw',
+        'key_filepath': None,
+        'key_password': None,
+    }
+
+    with pytest.raises(HostKeyMismatchError):
+        with SFTPManager(config, pins_path=pins_path):
+            pass
+
+
+def test_host_key_mismatch_is_not_an_sshexception():
+    """Test a mismatch escapes the retry decorators.
+
+    upload_file and download_file retry SSHException, so a mismatch
+    inheriting from it would be retried against a hostile server.
+    """
+    assert not issubclass(HostKeyMismatchError, SSHException)
