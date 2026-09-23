@@ -517,3 +517,35 @@ def test_poll_interval_loads_the_env_file_before_reading(monkeypatch):
     )
 
     assert resolve_poll_interval_seconds() == DOTENV_POLL_INTERVAL_SEC
+
+
+def test_an_unreachable_pending_path_is_skipped_not_fatal(tmp_path):
+    """Test one unreachable pending file doesn't abort the whole cycle.
+
+    Ledger paths are arbitrary strings from a database that may be
+    months old, so one can point at a network share that drops
+    mid-run. Path.is_file() only swallows a fixed set of OS errors --
+    Windows' ERROR_NETNAME_DELETED is not among them -- so without a
+    guard a single dropped share stops every delivery that cycle.
+    """
+    source_dir = tmp_path / 'source'
+    source_dir.mkdir()
+    reachable = source_dir / 'reachable.txt'
+    reachable.touch()
+
+    unreachable = MagicMock()
+    unreachable.is_file.side_effect = OSError(
+        64,
+        'The specified network name is no longer available',
+    )
+
+    db_path = tmp_path / 'history.db'
+    with HistoryTracker(db_path) as tracker:
+        with patch.object(
+            tracker,
+            'get_pending_failed_files',
+            return_value=[unreachable],
+        ):
+            selected = select_files_to_send([str(source_dir)], None, tracker)
+
+    assert [f.name for f in selected] == ['reachable.txt']

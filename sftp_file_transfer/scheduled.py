@@ -57,6 +57,30 @@ def resolve_poll_interval_seconds() -> int:
 POLL_INTERVAL_SECONDS = resolve_poll_interval_seconds()
 
 
+def _is_readable_file(path: Path) -> bool:
+    """Check a ledger path without letting an unreachable one raise.
+
+    Paths come from a ledger that may be months old and can point at a
+    removed drive or a network share that drops mid-run. Path.is_file()
+    swallows only a fixed set of OS errors -- notably not Windows'
+    ERROR_NETNAME_DELETED -- so without this guard a single unreachable
+    share aborts the whole cycle instead of skipping one file, and no
+    file gets sent until someone notices.
+
+    Args:
+        path: A local path as the send-history ledger recorded it.
+
+    Returns:
+        bool: True if the path is a readable file, False if it is
+            missing or currently unreachable.
+    """
+    try:
+        return path.is_file()
+    except OSError as e:
+        logger.warning(f'Skipping unreachable path {path}: {e}')
+        return False
+
+
 def select_files_to_send(
     local_dir_list: List[str],
     file_extension: Optional[str],
@@ -96,7 +120,7 @@ def select_files_to_send(
         )
 
     failed_files = [
-        f for f in tracker.get_pending_failed_files() if f.is_file()
+        f for f in tracker.get_pending_failed_files() if _is_readable_file(f)
     ]
 
     combined: dict = {}
