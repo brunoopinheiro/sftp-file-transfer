@@ -281,6 +281,31 @@ def test_dashboard_shows_disconnected_state(tmp_path):
     _run(scenario())
 
 
+def test_dashboard_distinguishes_a_host_key_mismatch(tmp_path):
+    """Test a host key mismatch is not shown as a plain disconnection.
+
+    An operator must be able to tell an intercepted connection from the
+    site's network simply being down.
+    """
+    state = DashboardState(
+        db_connected=True,
+        sftp_connected=False,
+        sftp_host_key_mismatch=True,
+    )
+    app = MonitorApp(
+        history_db_path=tmp_path / 'history.db',
+        initial_state=state,
+    )
+
+    async def scenario():
+        async with app.run_test():
+            content = str(app.screen.query_one('#status-content').content)
+            assert 'HOST KEY MISMATCH' in content
+            assert '○ DISCONNECTED' not in content
+
+    _run(scenario())
+
+
 def test_dashboard_status_rows_are_left_and_right_aligned(tmp_path):
     """Test each STATUS row is a single fixed-width line: label left,
     value right, not just concatenated with a single space."""
