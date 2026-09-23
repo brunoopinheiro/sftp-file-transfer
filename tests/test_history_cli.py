@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
+from sftp_file_transfer import history_cli
 from sftp_file_transfer.components.history_tracker import HistoryTracker
 from sftp_file_transfer.components.host_pins import (
     HostPin,
@@ -41,6 +42,21 @@ def _patched_transport(mock_transport):
             return_value=mock_transport,
         ),
     )
+
+
+def test_cli_output_is_plain_text_under_test():
+    """Test rich never emits ANSI in the suite, whatever the terminal.
+
+    Guards the colour setup at the top of tests/conftest.py. Without it,
+    every assertion on CLI output breaks on a machine with FORCE_COLOR
+    set, because rich's highlighter wraps interpolated values in style
+    spans and the asserted substrings stop being contiguous.
+
+    Asserts color_system rather than is_terminal on purpose: rendering
+    styles output from the colour system cached at construction, so
+    is_terminal can read False while ANSI is still being emitted.
+    """
+    assert history_cli.console.color_system is None
 
 
 def _seed(db_path, sent_name='sent.txt', failed_name='failed.txt'):
